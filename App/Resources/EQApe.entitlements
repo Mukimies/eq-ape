@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened runtime resource access "Audio Input". Apple's entitlement reference: "may record
+	     audio using the built-in microphone and access audio input using Core Audio". Whether Core Audio
+	     process taps strictly need it under the hardened runtime is NOT confirmed by the SDK headers
+	     (they say nothing about entitlements); it is included as the conservative choice. It does not
+	     itself raise a prompt; TCC still asks for audio capture (NSAudioCaptureUsageDescription).
+	     The app is not sandboxed. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

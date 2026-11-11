@@ -1,0 +1,36 @@
+# Swift / SwiftPM / Xcode build output
+.build/
+build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+xcuserdata/
+
+# macOS
+.DS_Store
+
+# Release output and scratch
+dist/out/
+.scratch/
+*.dmg
+
+# Internal working files
+docs/SPEC.md
+docs/.publish-todo.md
+
+# Signing material and secrets
+*.p12
+*.cer
+*.provisionprofile
+*.mobileprovision
+*.keychain
+*.keychain-db
+.env
+.env.*
+AuthKey_*.p8
+*.p8
+*.pem
+sparkle_ed_private_key*
+*sparkle*private*
+ed25519_private*
