@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems: do not report them here; see SECURITY.md (private vulnerability reporting).
+  - type: input
+    id: version
+    attributes:
+      label: EQ Ape version
+      description: For example 0.1.0-beta.1, or the commit if built from source
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: For example 26.6.2 (Apple menu > About This Mac)
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Output device and type
+      description: Name and kind, for example "Scarlett Solo USB (USB audio interface)", "MacBook Pro Speakers (built-in)", "AirPods (Bluetooth)", "Studio Display (HDMI/DisplayPort)"
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options: [Built-in, USB, Bluetooth, AirPlay, HDMI / DisplayPort, Thunderbolt, Virtual device, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: permission
+    attributes:
+      label: Audio-capture permission state
+      description: System Settings > Privacy & Security > Screen & System Audio Recording (the pane name may differ by macOS version)
+      options: [Allowed, Denied, Prompt never appeared, Prompt is still pending, Not sure]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: config
+    attributes:
+      label: Config file
+      description: Paste the EQ config file you were using (Equalizer APO format), or the relevant part. Remove anything private. Also paste any warnings the app showed.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Installed via DMG, Homebrew or from source? Other audio software running (BlackHole, Loopback, ...)?
