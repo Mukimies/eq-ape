@@ -1,12 +1,20 @@
 import Foundation
 
-// One binary, two modes:
-//   EQApe                    -> menu bar app (SwiftUI MenuBarExtra)
-//   EQApe --headless ...     -> terminal test mode (status line per second), see Headless.swift
+// One binary, several modes:
+//   EQApe                         -> menu bar app (SwiftUI MenuBarExtra); GUI flags in LaunchOptions.swift
+//   EQApe --no-engine [...]       -> GUI without any audio engine, taps or device I/O
+//   EQApe --render-snapshots dir  -> render views offscreen to PNG and exit (no engine)
+//   EQApe --headless ...          -> terminal test mode (status line per second), see Headless.swift
 //   EQApe --list | --get-default | --set-default <name> | --probe --device <name> | --taps
 let cliCommands: Set<String> = ["--headless", "--list", "--get-default", "--set-default", "--set-rate", "--probe", "--taps", "--help", "-h"]
-if CommandLine.arguments.dropFirst().contains(where: { cliCommands.contains($0) }) {
-    Headless.main(Array(CommandLine.arguments.dropFirst()))
+let launchArgs = Array(CommandLine.arguments.dropFirst())
+if launchArgs.contains(where: { cliCommands.contains($0) }) {
+    Headless.main(launchArgs)
 } else {
-    EQApeApp.main()
+    LaunchOptions.current = LaunchOptions.parse(launchArgs)
+    if let dir = LaunchOptions.current.renderSnapshots {
+        MainActor.assumeIsolated { SnapshotRenderer.run(outputDirectory: dir) }
+    } else {
+        EQApeApp.main()
+    }
 }

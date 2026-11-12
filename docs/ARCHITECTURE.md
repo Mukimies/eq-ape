@@ -11,7 +11,7 @@ device without a virtual audio driver, using Core Audio process taps. Configurat
 | `poc-tap/` | Swift package, command-line tool `eqtap`: the proof of concept of tap, mute and replay on one device. |
 | `App/` | The menu bar app (`EQ Ape.app`), combining the tap engine with EQCore. Built with `App/bundle.sh`. See `docs/APP-NOTES.md`. |
 | `dist/` | DMG tooling, draft release workflow and draft Homebrew cask. See `docs/DISTRIBUTION.md`. |
-| `docs/` | Background and findings: `TAP-FINDINGS.md` (tap measurements), `EQCORE-NOTES.md`, `APO-PARITY.md`, `DISTRIBUTION.md`, `IDEA.md`. |
+| `docs/` | Background and findings: `TAP-FINDINGS.md` (tap measurements), `EQCORE-NOTES.md`, `APO-PARITY.md`, `EDITOR-NOTES.md` (config editor and GUI), `screenshots/`, `DISTRIBUTION.md`, `IDEA.md`. |
 
 ## How the audio path works
 

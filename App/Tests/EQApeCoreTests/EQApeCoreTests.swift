@@ -196,4 +196,38 @@ final class EQApeCoreTests: XCTestCase {
         XCTAssertEqual(c.status.state, .noDevice)
         c.shutdown()
     }
+
+    // MARK: settings.json watching (controller never started: no engine)
+
+    func testSettingsFileChangesAreReloadedAndReadOnlyIsHonoured() throws {
+        let u = dir.appendingPathComponent("settings.json")
+        let store = SettingsStore(fileURL: u)
+        try store.save(Settings(profiles: ["U1": DeviceProfile(deviceName: "A", configPath: "/a.txt")]))
+        let c = TapController(mode: .fixed("no-such-device"), store: store)
+        var seen: [Settings] = []
+        let exp = expectation(description: "reloaded")
+        exp.assertForOverFulfill = false   // own changes notify too
+        c.onSettingsChange = { s in seen.append(s); exp.fulfill() }
+        c.watchSettingsFile(interval: 0.1)
+        Thread.sleep(forTimeInterval: 0.3)
+        try #"{"enabled": false, "profiles": {"U1": {"deviceName": "A", "configPath": "/b.txt", "headroomDB": 2}}}"#
+            .write(to: u, atomically: true, encoding: .utf8)
+        wait(for: [exp], timeout: 3)
+        XCTAssertEqual(c.currentSettings.profiles["U1"]?.configPath, "/b.txt")
+        XCTAssertFalse(c.currentSettings.enabled)
+        XCTAssertEqual(seen.last?.profiles["U1"]?.headroomDB, 2)
+        // read-only: changes stay in memory, the file is not written
+        c.settingsReadOnly = true
+        let before = try Data(contentsOf: u)
+        c.setProfile(uid: "U2", DeviceProfile(deviceName: "B"))
+        XCTAssertNotNil(c.currentSettings.profiles["U2"])
+        XCTAssertEqual(try Data(contentsOf: u), before)
+        c.settingsReadOnly = false
+        c.setProfile(uid: "U2", nil)
+        _ = c.currentSettings   // drains the control queue
+        XCTAssertNil(try store.load().profiles["U2"])
+        XCTAssertNotEqual(try Data(contentsOf: u), before, "written when not read-only")
+        c.shutdown()
+        XCTAssertEqual(c.status.abBypass, false)
+    }
 }

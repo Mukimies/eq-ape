@@ -9,10 +9,33 @@ Early beta, built in one evening. What has and has not been checked:
 - **Measured and tested:** the tap engine (tap, aggregate device, in-place processing, replay to the same device) was measured on a Scarlett Solo USB and on MacBook Pro Speakers: real audio, processing applied, no overloads or timestamp discontinuities, about 23-24 ms added delay. The DSP and config parser are covered by automated tests (`EQCore`, including a parity audit against Equalizer APO's documented behaviour).
 - **Needs listening confirmation on each setup:** that the original, unprocessed sound is actually muted. There is no measurable proxy for this, so it has only been designed for (a muted-while-tapped tap), not confirmed by ear on every device.
 - **Tested headless only:** the app logic (per-device profiles, following the default output, live config reload, sample-rate change, a 5-minute soak, recovery after `kill -9`) was exercised through the app's headless mode. See `docs/APP-NOTES.md` for the numbers.
-- **Not tested at all:** the menu bar GUI has never been launched, and the app's own permission prompt has never been seen.
+- **GUI:** the configuration editor and settings window were rendered offscreen and inspected, and the real GUI was launched with `--no-engine` (no audio engine) and driven in-process by a scripted smoke test (graph drag, live save, undo). It has not yet been used by a person with the engine running. See `docs/EDITOR-NOTES.md`.
+- **Not tested at all:** the app's own permission prompt has never been seen.
 - **Unverified:** Bluetooth, AirPlay and HDMI outputs; unplug/replug and sleep/wake; runs longer than five minutes; whether the audio-capture permission survives updates of an unsigned build.
 
 See `docs/APP-NOTES.md` for app-level status. See `docs/TAP-FINDINGS.md` for the full list of what was and was not verified for the tap engine.
+
+## The editor
+
+"Open Editor…" in the menu opens a configuration editor in the spirit of Equalizer APO's Configuration Editor:
+
+- A frequency-response graph of the whole config, drawn separately for left and right when they differ. It includes
+  high- and low-pass filters, the GraphicEQ curve, and optionally the preamp and the automatic anti-clipping gain. It
+  marks the peak that sets the anti-clipping gain and has a hover read-out.
+- Draggable handles on the graph for peaking and shelf filters: horizontal = frequency, vertical = gain, ⌥-drag or
+  scroll wheel = Q.
+- A filter list with sliders and fields for each filter, the preamp, Channel sections, included files as collapsible
+  sections, and "Enable" for REW's commented-out filters.
+- A band editor with vertical sliders for GraphicEQ lines.
+- Live saving: changes are written to the file about 150 ms after you stop, and the engine reloads them, so you hear
+  them while dragging. Only the lines you change are rewritten; everything else in the file stays byte for byte.
+- Each file is backed up before its first change in a session (`~/Library/Application Support/EQ Ape/Backups`, last 20
+  sessions kept).
+- Undo/redo, "Revert to Version at Open", and an A/B bypass button.
+
+![EQ Ape editor](docs/screenshots/editor-real-light.png)
+
+Details, verification and known issues: `docs/EDITOR-NOTES.md`.
 
 ## Requirements
 
@@ -31,7 +54,7 @@ There is no virtual driver and no admin password: your real device stays the sel
 
 macOS asks for the **audio capture** permission the first time EQ Ape starts processing. It is needed because a process tap is the only way, short of a virtual driver, to receive the audio other apps send to an output device. It is not a microphone permission and EQ Ape does not record anything.
 
-Audio is processed in memory only. It is not written to disk and not sent anywhere. The app makes no network connections: a search of the source (`App/`, `EQCore/`, `poc-tap/`) found no use of URLSession, the Network framework or sockets, and no update checker. The only external things it opens are local files and folders (your config file and its settings folder) in the default editor or Finder. You can audit this yourself in the source.
+Audio is processed in memory only. It is not written to disk and not sent anywhere. The app makes no network connections: a search of the source (`App/`, `EQCore/`, `poc-tap/`) found no use of URLSession, the Network framework or sockets, and no update checker. The only external things it opens are local files and folders (your config files, its settings and backup folders) and the Privacy & Security pane of System Settings. You can audit this yourself in the source.
 
 Warning for contributors and testers: an unanswered macOS permission prompt can stall new audio for every app on the Mac until it is answered. See `docs/ARCHITECTURE.md`.
 
@@ -69,7 +92,11 @@ Requires a recent Xcode or Swift toolchain on an Apple Silicon Mac.
 cd EQCore && swift test        # DSP and parser tests
 cd poc-tap && ./build.sh       # command-line proof of concept, builds build/eqtap.app
 cd App && ./bundle.sh          # builds "App/build/EQ Ape.app" (arm64, ad-hoc signed, not launched by the script)
+cd App && BUILD_DIR=build-dev ./bundle.sh   # same, into App/build-dev (leaves a running build/ copy alone)
 ```
+
+To try the GUI without any audio engine (no taps, no permission prompt): run
+`"App/build-dev/EQ Ape.app/Contents/MacOS/EQApe" --no-engine --editor <a copy of your config>`.
 
 For app-level instructions and notes see `docs/APP-NOTES.md`. Building does not start audio, but running the app or `eqtap` will trigger the audio-capture permission prompt.
 

@@ -37,7 +37,7 @@ public struct EQConfig: Equatable, Sendable {
     public init(left: [Stage] = [], right: [Stage] = []) { self.left = left; self.right = right }
 }
 
-public struct ParseResult {
+public struct ParseResult: Sendable {
     public var config: EQConfig
     public var warnings: [String]
     public init(config: EQConfig, warnings: [String]) { self.config = config; self.warnings = warnings }

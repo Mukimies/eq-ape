@@ -34,3 +34,7 @@ AuthKey_*.p8
 sparkle_ed_private_key*
 *sparkle*private*
 ed25519_private*
+
+# local agent worktrees
+.claude/
+App/build-dev/

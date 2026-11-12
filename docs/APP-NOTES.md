@@ -4,9 +4,11 @@ Date 2026-11-11. macOS 26.6.2, Apple Silicon, Swift 6.3.3. EQ Ape is Apple Silic
 Working names: user-visible name **EQ Ape**, executable and identifiers `EQApe`, bundle id placeholder
 `org.eqape.EQApe`, settings in `~/Library/Application Support/EQ Ape/settings.json`.
 
-**Status:** the package builds and its 13 unit tests pass. All five runtime tests below passed in headless mode on the
-real hardware, plus an extra sample-rate test. The bundle builds and passes verification but was **never launched**,
-on purpose (permission-prompt hazard). The GUI, the app's own permission prompt, and muting by ear are unverified.
+**Status:** the package builds and its unit tests pass (13 at phase 2, 20 since the editor update). All five runtime tests below passed in headless mode on the
+real hardware, plus an extra sample-rate test. The bundle builds and passes verification. The release bundle was
+never launched with its engine, on purpose (permission-prompt hazard). The GUI was only launched with `--no-engine`
+(editor update, 2026-11-12: 20 App tests; see `docs/EDITOR-NOTES.md`). The app's own permission prompt and muting by
+ear are unverified.
 
 ## Architecture
 
@@ -25,7 +27,7 @@ App/ (Swift package, swift-tools 6.0, Swift 5 language mode, macOS 14.2+, depend
      FileWatcher.swift   stat-polling watcher (0.25 s, settle 1 tick)
      TapController.swift control-queue state machine: device following, rebuilds, reloads, swaps
   Sources/EQApe        executable: SwiftUI MenuBarExtra app + headless/CLI mode (same binary)
-  Tests/EQApeCoreTests 13 tests (settings, profile rules, fallbacks, includes, file watching, slot, controller)
+  Tests/EQApeCoreTests 20 tests (settings, profile rules, fallbacks, includes, file watching, slot, controller, editor)
   Resources/           Info.plist, EQApe.entitlements, make-icon.swift
   bundle.sh            release arm64 build -> build/EQ Ape.app, ad-hoc signed (hardened runtime), verified
   scripts/runtime-test.sh  guarded runtime tests (always restore BlackHole + CamillaDSP)
@@ -87,24 +89,32 @@ automatically when files in its config directory change, and it follows includes
 detail; the watcher is an independent re-implementation.
 
 **GUI (`EQApe` without arguments):** SwiftUI `MenuBarExtra` (`.menu` style), `LSUIElement` plus the `.accessory`
-activation policy. The menu has:
-- an on/off toggle;
-- the output device name and state (active / bypassed (reason) / no profile / profile disabled / no config file
-  chosen / error text);
-- the config file name;
-- level in/out (dBFS), the clip indicator (held for about 2 s) with a total count, and the anti-clipping gain;
-- "Choose Config File…" (NSOpenPanel), "Open Config in Editor" (NSWorkspace default app), "Reload", an
-  "Anti-Clipping Gain" toggle, and "Remove Profile for This Device";
-- "Show N Config Warning(s)…" (an NSAlert with a scrolling text view);
-- "Launch at Login" (`SMAppService.mainApp` register/unregister, only when the user toggles it; never called here);
-- "Open Settings Folder" and "Quit EQ Ape".
+activation policy. Updated 2026-11-12; details in `docs/EDITOR-NOTES.md`. The menu has:
+- the on/off toggle;
+- "device: state";
+- "Bypass (A/B)";
+- "Reload" (only in an error state such as "audio start blocked");
+- "Open Editor…";
+- "Settings…";
+- "Quit EQ Ape".
+
+The config editor window shows the response graph with draggable handles, the filter list, the GraphicEQ band editor,
+live saving with backups, undo, and a status strip with meters, the anti-clipping gain, A/B bypass and warnings. The
+Settings window lists the device profiles (config, enabled, anti-clipping and headroom), Launch at Login
+(`SMAppService`, only when toggled) and the permission explanation with a link to System Settings. A first-run window
+explains the permission prompt before the engine first starts (only when there are no profiles yet). settings.json is
+now re-read when it changes on disk.
+
+GUI launch flags: `--no-engine` (no engine, taps or device I/O; settings read-only unless `--settings`),
+`--editor <file>`, `--settings <file>`, `--backup-dir <dir>`, `--render-snapshots <dir>`, `--smoke-test`.
+`BUILD_DIR=build-dev ./bundle.sh` builds into `App/build-dev/`.
 
 ## Build and run
 
 ```sh
 cd ~/code/standalone-mac-eq/App
 swift build                 # debug
-swift test                  # 13 tests
+swift test                  # 20 tests
 ./bundle.sh                 # release arm64 -> build/EQ Ape.app, ad-hoc signed + verified (never launched)
 B=.build/arm64-apple-macosx/release/EQApe
 $B --list | --get-default | --set-default "<name>" | --set-rate "<name>" <Hz> | --taps
@@ -172,9 +182,9 @@ Logs: `App/.scratch/*.log`.
 ## Not verified (cannot be, without a person)
 
 1. **That the original sound is muted** (no doubled or phasey sound). Needs listening. The same caveat as poc-tap.
-2. **The GUI:** the menu bar app was never started (permission hazard). It compiles, but layout, live updating of
-   the meter text while the menu is open (SwiftUI `.menu` style may only refresh on reopen), NSOpenPanel from an
-   accessory app, the warnings window, and the login-item toggle are untested.
+2. **The GUI with the engine:** the GUI was rendered offscreen and launched with `--no-engine` for a scripted
+   in-process smoke test (see `docs/EDITOR-NOTES.md`). Never tested with the engine running: the meters, the A/B
+   bypass, NSOpenPanel from an accessory app, the login-item toggle, and use by a person.
 3. **The app's own permission flow:** the audio-capture prompt text, whether a Microphone prompt also appears (see
    above), whether the ad-hoc grant survives rebuilds, and whether the entitlement is needed under the hardened
    runtime.
@@ -191,8 +201,8 @@ Logs: `App/.scratch/*.log`.
   on the new device.
 - System alert sounds go to the "system output" device, which is not tapped unless it is the same as the default
   output.
-- `settings.json` is read at launch and written on changes. External edits while the app runs are not picked up
-  (config files are).
+- `settings.json` is read at launch, written on changes, and (since the editor update) re-read when it changes on
+  disk.
 - In bypass (unusable config) the device is untouched. A save that leaves the file missing for longer than one
   poll (about 0.25–0.5 s) briefly tears down and rebuilds the engine. Normal and atomic saves do not.
 - The headless `--follow-default` uses `~/Library/Application Support/EQ Ape/settings.json` unless `--settings`

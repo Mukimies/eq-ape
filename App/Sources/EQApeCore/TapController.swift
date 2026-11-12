@@ -28,6 +28,8 @@ public final class TapController: @unchecked Sendable {
         public var reloads = 0
         public var aggregateInputStreams: Int?
         public var settingsError: String?
+        /// A/B bypass: the engine keeps running but plays the tapped audio unprocessed.
+        public var abBypass = false
         public init() {}
     }
 
@@ -54,6 +56,11 @@ public final class TapController: @unchecked Sendable {
     public var onEvent: ((String) -> Void)?
     /// Status changes (called on the main queue).
     public var onStatusChange: ((Status) -> Void)?
+    /// Settings changed (own change or settings.json edited on disk; called on the main queue).
+    public var onSettingsChange: ((Settings) -> Void)?
+    /// When true, settings changes are kept in memory only and never written (used with `--no-engine` unless a
+    /// settings file is given explicitly, so a development run never touches the real settings.json).
+    public var settingsReadOnly = false
 
     // MARK: state (control queue only)
 
@@ -69,7 +76,10 @@ public final class TapController: @unchecked Sendable {
     private var loaded: LoadedConfig?
     private var loadedPath: String?
     private var processorSpec: (config: EQConfig?, headroom: Double?, sr: Double, ch: Int)?
+    private var abBypass = false
+    private var eqBox: ProcessorBox?                 // the current EQ processor, also while A/B-bypassed
     private let watcher = FileWatcher()
+    private var settingsWatcher: FileWatcher?
     private var pendingWork: DispatchWorkItem?
     private var pendingForce = false
     private var pendingReload = false
@@ -110,7 +120,7 @@ public final class TapController: @unchecked Sendable {
         }
     }
 
-    deinit { watcher.stop() }
+    deinit { watcher.stop(); settingsWatcher?.stop() }
 
     // MARK: public API (any thread)
 
@@ -136,6 +146,7 @@ public final class TapController: @unchecked Sendable {
             for o in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
             workspaceObservers.removeAll()
             watcher.stop()
+            settingsWatcher?.stop(); settingsWatcher = nil
             teardown(reason: "shutdown")
         }
     }
@@ -150,12 +161,66 @@ public final class TapController: @unchecked Sendable {
     public func updateSettings(_ change: @escaping (inout Settings) -> Void) {
         queue.async { [self] in
             change(&settings)
-            if let store {
+            if let store, !settingsReadOnly {
                 do { try store.save(settings); setStatus { $0.settingsError = nil } }
                 catch { setStatus { $0.settingsError = "could not save settings: \(error.localizedDescription)" } }
             }
+            notifySettings()
             startBlocked = false
-            scheduleReconcile(force: false, reload: true, delay: 0)
+            if started { scheduleReconcile(force: false, reload: true, delay: 0) }
+        }
+    }
+
+    private func notifySettings() {
+        let s = settings
+        if let cb = onSettingsChange { DispatchQueue.main.async { cb(s) } }
+    }
+
+    /// Re-read settings.json when it changes on disk (an edit in a text editor, or another copy of the app).
+    /// Works with or without `start()`.
+    public func watchSettingsFile(interval: TimeInterval = 0.5) {
+        guard let store else { return }
+        queue.async { [self] in
+            guard settingsWatcher == nil else { return }
+            let w = FileWatcher(interval: interval)
+            w.onChange = { [weak self] in self?.queue.async { self?.reloadSettingsFromDisk() } }
+            w.watch([store.fileURL])
+            settingsWatcher = w
+        }
+    }
+
+    private func reloadSettingsFromDisk() {
+        guard let store else { return }
+        do {
+            let s = try store.load()
+            setStatus { $0.settingsError = nil }
+            guard s != settings else { return }
+            settings = s
+            event("settings.json changed on disk: reloaded")
+            notifySettings()
+            if started { scheduleReconcile(force: false, reload: true, delay: 0) }
+        } catch {
+            setStatus { $0.settingsError = "\(error)" }
+        }
+    }
+
+    /// Replace (or with nil remove) the profile of a device by UID.
+    public func setProfile(uid: String, _ profile: DeviceProfile?) {
+        updateSettings { $0.profiles[uid] = profile }
+    }
+
+    /// A/B bypass: when on, the running engine plays the tapped audio unprocessed (unity) until switched off.
+    /// The switch is one lock-free pointer swap on the audio path, effective from the next IO cycle.
+    public func setABBypass(_ on: Bool) {
+        queue.async { [self] in
+            guard on != abBypass else { return }
+            abBypass = on
+            if engine != nil {
+                let old = slot.swap(on ? nil : eqBox)
+                _ = old   // the EQ box stays referenced by eqBox; released here otherwise
+            }
+            setStatus { $0.abBypass = on }
+            event("A/B bypass \(on ? "on" : "off")")
         }
     }
 
@@ -350,7 +415,8 @@ public final class TapController: @unchecked Sendable {
             let eq = EQProcessor(config: want, sampleRate: sr, channels: ch, headroomDB: headroom, maxFrames: 4096)
             box = ProcessorBox(eq: eq, channels: ch, sampleRate: sr)
         }
-        let old = slot.swap(box)
+        eqBox = box
+        let old = slot.swap(abBypass ? nil : box)
         processorSpec = (want, headroom, sr, ch)
         let gain = box?.appliedGainDB ?? 0
         setStatus { $0.appliedGainDB = box == nil ? nil : gain }
@@ -366,6 +432,7 @@ public final class TapController: @unchecked Sendable {
         }
         engine = nil; engineKey = nil; engineDevice = 0
         if slot.current != nil { _ = slot.swap(nil) }
+        eqBox = nil
         processorSpec = nil
     }
 
