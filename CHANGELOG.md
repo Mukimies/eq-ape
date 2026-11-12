@@ -4,6 +4,10 @@ All notable changes to EQ Ape are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-11-12
+
+Second pre-release (ad-hoc signed, not notarized, Apple Silicon only, macOS 14.2+).
+
 ### Added
 - `--require-granted`: the GUI starts an engine only when the no-prompt preflights say no permission prompt can appear (audio capture granted); otherwise the engine stays off with the state "engine off: …". `--print-permission` prints the preflights and the code-signing identity.
 - Instance guard: an EQ Ape process keeps its engine off while another one may be processing the same output device (per-user instance registry and per-device lock, no sockets), so two taps never process the audio twice.
@@ -13,6 +17,8 @@ All notable changes to EQ Ape are documented here. The format follows [Keep a Ch
 
 ### Fixed
 - Opening the first-run window could crash the app (AppKit "update constraints" exception from automatic window sizing); found by the UI-test suite.
+- Pressing Return in a number field of the editor discarded the typed value (Tab worked).
+- The band-slider sheet's header was squeezed and "Remove Band" truncated at small window sizes.
 
 ## [0.1.0-beta.1] - 2026-11-12
 
@@ -32,5 +38,6 @@ First public pre-release (ad-hoc signed, not notarized, Apple Silicon only, macO
 ### Known issues
 See `docs/releases/v0.1.0-beta.1.md`.
 
-[Unreleased]: https://github.com/Mukimies/eq-ape/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/Mukimies/eq-ape/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/Mukimies/eq-ape/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/Mukimies/eq-ape/releases/tag/v0.1.0-beta.1
