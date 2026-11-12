@@ -61,6 +61,15 @@ public final class TapController: @unchecked Sendable {
     /// When true, settings changes are kept in memory only and never written (used with `--no-engine` unless a
     /// settings file is given explicitly, so a development run never touches the real settings.json).
     public var settingsReadOnly = false
+    /// Called on the control queue right before a tap would be created for a device (device ID, UID). Return a
+    /// reason to keep the engine off (`EngineState.held`); it is asked again every `heldRecheckInterval` seconds and
+    /// on every reconcile. Used for `--require-granted` and the instance guard (`EngineGate`).
+    public var startGate: ((AudioObjectID, String) -> String?)?
+    public var heldRecheckInterval: TimeInterval = 5
+    /// Hold `InstanceRegistry`'s per-device lock while an engine exists (GUI), so a second instance cannot tap
+    /// the same device.
+    public var useDeviceLock = false
+    private var deviceLock: InstanceRegistry.DeviceLock?
 
     // MARK: state (control queue only)
 
@@ -344,6 +353,14 @@ public final class TapController: @unchecked Sendable {
                 setStatus { $0.state = .error("audio start blocked: answer the audio-capture permission prompt, then choose Reload") }
                 return
             }
+            if let reason = startGate?(dev, uid) { hold(reason); return }
+            if useDeviceLock {
+                guard let lock = InstanceRegistry.lockDevice(uid) else {
+                    hold("another EQ Ape process holds the lock for this device (two taps would process the audio twice)")
+                    return
+                }
+                deviceLock = lock
+            }
             buildEngine(device: dev, uid: uid, key: key, config: config, headroom: headroom)
         } else if let e = engine {
             swapProcessorIfNeeded(config: config, headroom: headroom, sr: e.sampleRate, ch: e.tapChannels)
@@ -396,6 +413,16 @@ public final class TapController: @unchecked Sendable {
         }
     }
 
+    /// Keep the engine off for a safety reason (no tap was created) and ask the gate again later.
+    private func hold(_ reason: String) {
+        let changed = status.state != .held(reason)
+        setStatus { $0.state = .held(reason) }
+        if changed { event("engine held: \(reason)") }
+        let w = DispatchWorkItem { [weak self] in self?.reconcile(force: false, reload: false) }
+        retryWork = w
+        queue.asyncAfter(deadline: .now() + heldRecheckInterval, execute: w)
+    }
+
     private func fail(_ msg: String) {
         event("error: \(msg); retry in \(Int(retryDelay)) s")
         setStatus { $0.state = .error(msg) }
@@ -431,6 +458,7 @@ public final class TapController: @unchecked Sendable {
             event("engine stopped (\(reason))")
         }
         engine = nil; engineKey = nil; engineDevice = 0
+        deviceLock = nil
         if slot.current != nil { _ = slot.swap(nil) }
         eqBox = nil
         processorSpec = nil

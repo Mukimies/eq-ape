@@ -11,8 +11,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
 
     private(set) var editorWindow: NSWindow?
     private(set) var editorModel: EditorModel?
-    private var settingsWindow: NSWindow?
-    private var firstRunWindow: NSWindow?
+    private(set) var settingsWindow: NSWindow?
+    private(set) var firstRunWindow: NSWindow?
 
     /// Open the editor on `path`, or on the current device's config, or ask for a file.
     func openEditor(path: String?) {
@@ -78,7 +78,11 @@ final class WindowManager: NSObject, NSWindowDelegate {
         w.makeKeyAndOrderFront(nil)
     }
 
+    func closeSettings() { settingsWindow?.close() }
+    func closeFirstRun() { firstRunWindow?.close() }
+
     func openFirstRun() {
+        if let w = firstRunWindow { NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); return }
         let w = makeWindow(title: "Welcome to EQ Ape", autosave: nil, size: NSSize(width: 520, height: 300), minSize: nil,
                            view: FirstRunView(app: AppModel.shared, close: { [weak self] in
                                self?.firstRunWindow?.close(); self?.firstRunWindow = nil }),
@@ -94,14 +98,23 @@ final class WindowManager: NSObject, NSWindowDelegate {
         if resizable { style.insert(.resizable) }
         let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
         let host = NSHostingController(rootView: view)
-        host.sizingOptions = resizable ? [] : [.preferredContentSize]
+        // No automatic sizing: `.preferredContentSize` let NSHostingController re-measure the SwiftUI view inside the
+        // window's constraint pass, which can throw AppKit's "needs update constraints" exception and crash the app
+        // (found by the UI-test suite opening the first-run window, 2026-11-12). A fixed-size window is measured once.
+        host.sizingOptions = []
         w.contentViewController = host
         w.title = title
         w.isReleasedWhenClosed = false
         w.delegate = self
         if let m = minSize { w.contentMinSize = m }
-        w.setContentSize(size)
-        if let name = autosave {
+        if resizable {
+            w.setContentSize(size)
+        } else {
+            let fit = host.view.fittingSize
+            w.setContentSize(NSSize(width: max(size.width, fit.width), height: fit.height > 1 ? fit.height : size.height))
+        }
+        // UI-test runs never write window frames to the shared org.eqape.EQApe user defaults.
+        if let name = autosave, !LaunchOptions.current.uiTest {
             if !w.setFrameUsingName(name) { w.center() }
             w.setFrameAutosaveName(name)   // remembers size and position
         } else {

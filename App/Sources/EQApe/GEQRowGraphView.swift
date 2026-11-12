@@ -19,8 +19,26 @@ final class GEQRowGraphNSView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         setAccessibilityElement(true)
-        setAccessibilityRole(.image)
+        setAccessibilityRole(.group)
         setAccessibilityLabel("Graphic EQ nodes")
+    }
+
+    /// Identifier stem of the row ("row.<file>:<line>"); the view is "<stem>.graph", nodes "<stem>.node.<n>".
+    var idPrefix = "" { didSet { setAccessibilityIdentifier("\(idPrefix).graph") } }
+    private var partCache: [String: GraphPartElement] = [:]
+
+    override func accessibilityChildren() -> [Any]? {
+        guard let o = overlay else { return [] }
+        return o.points.enumerated().map { i, p in
+            let c = pos(p)
+            let e = GraphPartElement.element(&partCache, id: "\(idPrefix).node.\(i + 1)", parent: self,
+                                             frameInView: NSRect(x: c.x - 7, y: c.y - 7, width: 14, height: 14),
+                                             label: "Graphic EQ node \(i + 1)", value: GEQNodeStyle.readout(p, index: i))
+            let ref = o.ref
+            e.onPress = { [weak self] in self?.onGEQ?(.select(ref, i)) }
+            e.onAdjust = { [weak self] d in self?.onGEQ?(.nudge(ref, i, 0, d)) }
+            return e
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -179,6 +197,7 @@ final class GEQRowGraphNSView: NSView {
 
 struct GEQRowGraph: NSViewRepresentable {
     var overlay: GEQOverlay
+    var idPrefix = ""
     var onGEQ: (GEQAction) -> Void
 
     func makeNSView(context: Context) -> GEQRowGraphNSView {
@@ -189,6 +208,7 @@ struct GEQRowGraph: NSViewRepresentable {
 
     func updateNSView(_ v: GEQRowGraphNSView, context: Context) {
         v.onGEQ = onGEQ
+        if v.idPrefix != idPrefix { v.idPrefix = idPrefix }
         if v.overlay != overlay { v.overlay = overlay }
     }
 }

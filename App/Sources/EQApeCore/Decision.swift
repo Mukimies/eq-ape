@@ -11,6 +11,9 @@ public enum EngineState: Equatable, Sendable {
     case starting
     case active
     case error(String)
+    /// The engine is kept off by a safety check before any tap is created (`EngineGate`: permission not granted
+    /// with --require-granted, or another EQ Ape instance may be processing the device). Audio is untouched.
+    case held(String)
 
     public var label: String {
         switch self {
@@ -23,6 +26,7 @@ public enum EngineState: Equatable, Sendable {
         case .starting: return "starting"
         case .active: return "active"
         case .error(let e): return "error: \(e)"
+        case .held(let why): return "engine off: \(why)"
         }
     }
 

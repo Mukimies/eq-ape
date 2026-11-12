@@ -8,6 +8,9 @@ let package = Package(
         .executable(name: "EQApe", targets: ["EQApe"]),
         .library(name: "TapKit", targets: ["TapKit"]),
         .library(name: "EQApeCore", targets: ["EQApeCore"]),
+        // Development tools (docs/UI-TESTING.md); not part of the app bundle.
+        .executable(name: "eqape-uitest", targets: ["UITestDriver"]),
+        .executable(name: "eqape-uidrive", targets: ["UIDrive"]),
     ],
     dependencies: [
         .package(path: "../EQCore"),
@@ -31,6 +34,14 @@ let package = Package(
         .executableTarget(
             name: "EQApe",
             dependencies: ["EQApeCore", "TapKit"]
+        ),
+        // Driver of the app's --ui-test-control channel: launch / do / state / shot / quit / suite (App/scripts/uitest).
+        .executableTarget(name: "UITestDriver"),
+        // Real-input helper (Accessibility + Screen Recording of the terminal): perms / tree / click / drag / type /
+        // shot with real CGEvents and pointer-safety checks (App/scripts/uidrive).
+        .executableTarget(
+            name: "UIDrive",
+            linkerSettings: [.linkedFramework("ApplicationServices"), .linkedFramework("AppKit")]
         ),
         .testTarget(
             name: "EQApeCoreTests",

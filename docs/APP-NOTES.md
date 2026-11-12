@@ -106,7 +106,9 @@ explains the permission prompt before the engine first starts (only when there a
 now re-read when it changes on disk.
 
 GUI launch flags: `--no-engine` (no engine, taps or device I/O; settings read-only unless `--settings`),
-`--editor <file>`, `--settings <file>`, `--backup-dir <dir>`, `--render-snapshots <dir>`, `--smoke-test`.
+`--require-granted` (engine only if no permission prompt can appear), `--print-permission` (preflights + code identity,
+then exit), `--editor <file>`, `--settings <file>`, `--backup-dir <dir>`, `--render-snapshots <dir>`, `--smoke-test`,
+`--ui-test-control <dir>` (test channel, `docs/UI-TESTING.md`).
 `BUILD_DIR=build-dev ./bundle.sh` builds into `App/build-dev/`.
 
 ## Build and run
@@ -132,7 +134,8 @@ overrides). Run from Terminal, the responsible process is Terminal, which has th
 - Info.plist: `CFBundleIdentifier org.eqape.EQApe`, name / display name "EQ Ape", `CFBundleExecutable EQApe`,
   version 0.1.0 (1), `LSUIElement` true, `LSMinimumSystemVersion` 14.2, `LSArchitecturePriority` [arm64],
   `NSAudioCaptureUsageDescription`, and a generated icon (`AppIcon.icns`).
-- Signature: ad hoc, `--options runtime`, entitlements `com.apple.security.device.audio-input`.
+- Signature: `--options runtime`, entitlements `com.apple.security.device.audio-input`; ad hoc, or the local
+  "EQ Ape Local Dev" identity when present (see "Stable local signing").
 - Verified: `plutil -lint` OK; `codesign --verify --deep --strict`: "valid on disk, satisfies its Designated
   Requirement"; flags `adhoc,runtime`; thin arm64.
 - **Entitlement uncertainty:** the CoreAudio SDK headers say nothing about entitlements for process taps. Apple's
@@ -156,6 +159,77 @@ Every test used the guarded script: CamillaDSP stopped, default output set to th
 | extra | Sample-rate change while running (Scarlett 48k to 44.1k to 48k) | Each change was detected (device, stream-format and aggregate events), and the engine was rebuilt at the new rate about 1.1 s later (start 54–56 ms). Processing continued at the same level, 0 overloads. Rate restored to 48000 (verified). |
 
 Logs: `App/.scratch/*.log`.
+
+## Engine safety checks (2026-11-12)
+
+Before any tap is created, `TapController.startGate` asks two questions (pure logic in `EQApeCore/EngineGate.swift`,
+unit-tested in `EngineGateTests`):
+
+- **Permission gate** (`--require-granted`): audio capture must be "granted" for the responsible process
+  (`TCCAccessPreflight`, read-only) and, when the device has input streams, the Microphone status
+  (`AVCaptureDevice.authorizationStatus(for: .audio)`, never prompts) must be decided; "not determined" or unknown is
+  unsafe. Otherwise the state is `.held("…")`, shown as "engine off: …" in the menu and the editor, printed on stdout,
+  and re-checked every 5 s. No tap or aggregate exists while held.
+- **Instance guard** (always): see `docs/UI-TESTING.md`, "Several instances". A per-user registry
+  (`$TMPDIR/org.eqape.EQApe.instances/<pid>.json`), a per-device `flock` held while an engine exists, and a process-table
+  scan for executables named `EQApe`. Older builds without a registry entry count as processing.
+
+`EQApe --print-permission` prints, as one JSON line: both preflights, the TCC Microphone preflight, the responsible
+process (Terminal when started from Terminal, the app itself when launched by Launch Services), and the code identity
+(identifier, designated requirement, cdhash, signer).
+
+## Stable local signing
+
+macOS stores the audio-capture grant with the app's designated requirement (DR). An ad-hoc signature's DR is its
+cdhash, which changes with every build, so every rebuild is a new app to TCC and may prompt again (the earlier
+expectation in `TAP-FINDINGS.md`). Signed with a self-signed certificate, the DR is
+`identifier "org.eqape.EQApe" and certificate leaf = H"<SHA-1 of the certificate>"`, the same for every build, so a
+grant given once should keep applying. `App/bundle.sh` uses such an identity ("EQ Ape Local Dev", or `SIGN_IDENTITY`)
+when present on a local build; CI and `dist/release.sh` stay ad hoc (Developer ID via `make-dmg.sh`). How to create the
+identity: `CONTRIBUTING.md`.
+
+Verified without any prompt: see "Permission persistence check" below. Not yet verified: that TCC actually honours
+the grant across a rebuild (needs one prompt answered by the owner; procedure below).
+
+## Permission persistence check (2026-11-12, no prompt raised)
+
+Two consecutive dev bundles signed with "EQ Ape Local Dev" (`BUILD_DIR=build-dev/perm-a` and `perm-b`; A had one extra
+string in the CLI help text, so the executables differ: SHA-1 `cd5f4311…` vs `9eb35fad…`):
+
+| | perm-a | perm-b |
+|---|---|---|
+| designated requirement | `identifier "org.eqape.EQApe" and certificate leaf = H"198169534a7cb232c162b345bbaef902f60e9bbf"` | identical |
+| cdhash | `fb865ef7bf6a15a6ed68d49febe05a4e04be32da` | `96ccfff1529bcb8ff157cbb747a5a9ea39f15dfa` |
+| `--print-permission` started from Terminal (responsible: Terminal) | audio capture granted, Microphone authorized (Terminal's grants) | same |
+| `--print-permission` via Launch Services (responsible: the app itself) | audio capture **not determined**, Microphone not determined | same |
+| GUI `--no-engine --require-granted`, own identity (`uitest launch --own-identity`) | prints "audio capture not determined, microphone not determined"; engine off | same |
+
+So the identity is stable across builds while the code hash changes, and nothing has been granted to it yet; the
+test stopped there (no prompt was raised, TCC was not touched).
+
+**Procedure to finish it with the owner present** (one prompt, answered at once):
+
+1. `cd ~/code/standalone-mac-eq/App && BUILD_DIR=build-dev/perm ./bundle.sh` and note the printed designated requirement
+   and cdhash (it must say `signed: EQ Ape Local Dev`).
+2. Quit the running EQ Ape (menu › Quit EQ Ape). Otherwise the new instance's instance guard keeps its engine off, and
+   two taps on the Scarlett would process the audio twice.
+3. Launch the signed build through Launch Services so that it is its own responsible process, without
+   `--require-granted` so that it may ask:
+   `open -n "build-dev/perm/EQ Ape.app" --stdout /tmp/eqape-perm1.log --stderr /tmp/eqape-perm1.log`.
+   macOS asks for audio capture (and probably Microphone, the Scarlett has inputs): **the owner answers Allow
+   immediately**. If the menu says "audio start blocked", answer the prompt, then Reload. Check: the menu shows "active".
+4. Quit it (menu › Quit EQ Ape).
+5. Rebuild with any code change (or the help-text trick above) into the same folder:
+   `BUILD_DIR=build-dev/perm ./bundle.sh`; confirm the designated requirement is unchanged and the cdhash differs.
+6. Launch it with the gate (the app is again its own responsible process):
+   `open -n "build-dev/perm/EQ Ape.app" --stdout /tmp/eqape-perm2.log --stderr /tmp/eqape-perm2.log --args --require-granted`,
+   then `cat /tmp/eqape-perm2.log`. Pass: "--require-granted: audio capture granted, microphone authorized" and the menu
+   shows "active" with **no prompt**. Fail: "not determined": the engine stays off ("engine off: …"), no prompt appears,
+   and the grant did not survive the rebuild.
+7. Quit it and start the usual EQ Ape again (`open "build/EQ Ape.app"`).
+
+Note: from now on `./bundle.sh` signs `App/build/` with "EQ Ape Local Dev" too when that identity exists (set
+`SIGN_IDENTITY=-` to keep ad hoc). The first launch of such a build is a new identity for TCC: expect one prompt.
 
 ## Device inputs in the aggregate (the `channels-in: 0` question)
 

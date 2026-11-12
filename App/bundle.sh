@@ -1,6 +1,11 @@
 #!/bin/sh
-# Build EQ Ape (release, Apple Silicon only) and assemble $BUILD_DIR/EQ Ape.app (default build/), ad-hoc signed
-# with the hardened runtime and the entitlements file that a later Developer ID signature will use.
+# Build EQ Ape (release, Apple Silicon only) and assemble $BUILD_DIR/EQ Ape.app (default build/), signed with the
+# hardened runtime and the entitlements file.
+# Signing identity (printed at the end together with the designated requirement):
+#   SIGN_IDENTITY=<name|SHA-1|->   wins ("-" = ad hoc; dist/release.sh always sets it explicitly)
+#   else EQAPE_LOCAL_SIGN=1, or (not in CI and the identity "EQ Ape Local Dev" is in the keychain): that local
+#        self-signed identity, so the audio-capture grant can survive rebuilds (docs/APP-NOTES.md, "Stable local signing")
+#   else ad hoc, as before.
 # BUILD_DIR=build-dev ./bundle.sh builds a development copy without touching build/ (for example while the
 # app in build/ is running). This script never launches the app.
 set -e
@@ -41,8 +46,18 @@ if [ ! -f "$BUILD_DIR/AppIcon.icns" ]; then
 fi
 [ -f "$BUILD_DIR/AppIcon.icns" ] && cp "$BUILD_DIR/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
-# Ad-hoc signature, hardened runtime, entitlements (replace "-" with a Developer ID identity later).
-codesign --force --sign - --options runtime --entitlements Resources/EQApe.entitlements \
+# Signature: hardened runtime, entitlements, fixed identifier (the designated requirement names it).
+LOCAL_IDENTITY="EQ Ape Local Dev"
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  IDENTITY="$SIGN_IDENTITY"; WHY="SIGN_IDENTITY"
+elif [ "${EQAPE_LOCAL_SIGN:-}" = "1" ]; then
+  IDENTITY="$LOCAL_IDENTITY"; WHY="EQAPE_LOCAL_SIGN=1"
+elif [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ] && security find-identity -p codesigning 2>/dev/null | grep -q "\"$LOCAL_IDENTITY\""; then
+  IDENTITY="$LOCAL_IDENTITY"; WHY="found in the keychain (local build)"
+else
+  IDENTITY="-"; WHY="default"
+fi
+codesign --force --sign "$IDENTITY" --options runtime --entitlements Resources/EQApe.entitlements \
   --identifier org.eqape.EQApe "$APP"
 
 echo "--- verify"
@@ -51,4 +66,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 codesign -d --entitlements - --xml "$APP" 2>/dev/null | plutil -p - 2>/dev/null || true
 codesign -dvv "$APP" 2>&1 | grep -E "^Identifier|^Format|flags|Info.plist"
 lipo -archs "$APP/Contents/MacOS/EQApe"
+if [ "$IDENTITY" = "-" ]; then echo "signed: ad hoc ($WHY)"; else echo "signed: $IDENTITY ($WHY)"; fi
+echo "designated requirement: $(codesign -d -r- "$APP" 2>&1 | sed -n 's/.*designated => //p')"
+echo "cdhash: $(codesign -dvvv "$APP" 2>&1 | sed -n 's/^CDHash=//p')"
 echo "built $APP (not launched)"

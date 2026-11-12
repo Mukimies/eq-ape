@@ -1,4 +1,4 @@
-# CI for EQ Ape. NOTE: this workflow has never run (written 2026-11-12, not yet pushed to GitHub).
+# CI for EQ Ape. NOTE: the UI suite step (added 2026-11-12) has never run in CI.
 name: ci
 
 on:
@@ -42,3 +42,23 @@ jobs:
           ./App/bundle.sh
           test -d "App/build/EQ Ape.app"
           lipo -archs "App/build/EQ Ape.app/Contents/MacOS/EQApe"
+
+      # Scripted GUI suite through the app's in-app test channel (docs/UI-TESTING.md): --no-engine, no OS permissions,
+      # events stay inside the app. THIS STEP HAS NEVER RUN IN CI. It needs a logged-in GUI session (window server);
+      # GitHub's hosted macOS runners normally provide one (UI tests run there), but that is not guaranteed, so the step
+      # is non-blocking until it has passed in CI a few times. The CI build is ad-hoc signed (bundle.sh never uses a
+      # local identity when CI is set). Screenshots are uploaded either way.
+      - name: UI suite (in-app channel, --no-engine; non-blocking)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          (cd App && BUILD_DIR=build-dev ./bundle.sh)
+          App/scripts/uitest suite --out "$RUNNER_TEMP/uitest-suite"
+
+      - name: Upload UI suite screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uitest-suite-screenshots
+          path: ${{ runner.temp }}/uitest-suite
+          if-no-files-found: ignore

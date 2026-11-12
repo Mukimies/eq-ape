@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import ServiceManagement
 import SwiftUI
 import EQApeCore
@@ -17,6 +18,8 @@ final class AppModel: ObservableObject {
     let controller: TapController
     /// True with `--no-engine`: no engine, no taps, no device I/O for the whole run.
     let engineDisabled: Bool
+    /// Offscreen snapshot model with fake status (never registers, never touches the engine).
+    let isPreview: Bool
     @Published var status = TapController.Status()
     @Published var settings = AppSettings()
     @Published var enabled = true
@@ -39,6 +42,7 @@ final class AppModel: ObservableObject {
     init(options: LaunchOptions, preview: (TapController.Status, AppSettings)? = nil) {
         self.options = options
         engineDisabled = options.noEngine && preview == nil
+        isPreview = preview != nil
         let store = SettingsStore(fileURL: options.settingsPath.map { URL(fileURLWithPath: $0) } ?? SettingsStore.defaultFileURL)
         controller = TapController(mode: .followDefault, store: preview == nil ? store : nil,
                                    ephemeral: preview?.1)
@@ -53,8 +57,29 @@ final class AppModel: ObservableObject {
         enabled = settings.enabled
         status = controller.status
         controller.onStatusChange = { [weak self] st in
-            MainActor.assumeIsolated { self?.status = st }
+            MainActor.assumeIsolated {
+                self?.status = st
+                self?.writeRegistry()
+            }
         }
+        controller.onEvent = { s in print("EQ Ape: \(s)"); fflush(stdout) }
+        // Safety checks before any tap is created: the instance guard always (two taps on one device would process
+        // the audio twice), the permission gate with --require-granted (no prompt may appear in unattended runs).
+        let requireGranted = options.requireGranted
+        controller.useDeviceLock = true
+        controller.startGate = { dev, uid in
+            let inputs = HAL.channels(dev, scope: kAudioObjectPropertyScopeInput) > 0
+            let p = EngineGate.PermissionInputs(capture: PermissionCheck.capture(), microphone: PermissionCheck.microphone(),
+                                                deviceHasInputs: inputs)
+            if let r = EngineGate.permissionBlock(p, requireGranted: requireGranted) { return r }
+            return EngineGate.instanceBlock(peers: InstanceRegistry.peers(), deviceUID: uid)
+        }
+        if requireGranted {
+            print("EQ Ape: --require-granted: audio capture \(PermissionCheck.capture().rawValue), microphone \(PermissionCheck.microphone().rawValue)"
+                  + " (no-prompt preflights for the responsible process); the engine starts only if no prompt can appear")
+            fflush(stdout)
+        }
+        writeRegistry()
         controller.onSettingsChange = { [weak self] s in
             MainActor.assumeIsolated {
                 self?.settings = s
@@ -74,6 +99,20 @@ final class AppModel: ObservableObject {
         meterTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+    }
+
+    private let started = Date()
+
+    /// This process's entry in the instance registry (see `InstanceRegistry`): other EQ Ape processes read it to
+    /// know whether this one may be processing a device.
+    func writeRegistry() {
+        guard !isPreview else { return }
+        let st = status
+        let engine = engineDisabled ? "off" : st.state.touchesAudio ? "active" : "following"
+        InstanceRegistry.write(InstanceRegistry.Entry(pid: getpid(), executable: Bundle.main.executablePath ?? CommandLine.arguments[0],
+                                                      engine: engine, deviceUID: st.state.touchesAudio ? st.deviceUID : nil,
+                                                      deviceName: st.state.touchesAudio ? st.deviceName : nil,
+                                                      uiTest: options.uiTest, started: started))
     }
 
     func refreshDevices() {
@@ -132,10 +171,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// UI-test runs (--ui-test-control) record what would be opened instead of opening Finder or System Settings.
+    @Published var uiTestOpened: [String] = []
+
+    @discardableResult
+    private func open(_ url: URL) -> Bool {
+        if options.uiTest { uiTestOpened.append(url.absoluteString); return true }
+        return NSWorkspace.shared.open(url)
+    }
+
     func openSettingsFolder() {
         let dir = SettingsStore.defaultDirectory
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(dir)
+        if !options.uiTest { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+        open(dir)
     }
 
     var backupDirectory: URL {
@@ -144,17 +192,19 @@ final class AppModel: ObservableObject {
 
     func openBackupsFolder() {
         try? FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(backupDirectory)
+        open(backupDirectory)
     }
 
     func openPrivacySettings() {
         // System Settings > Privacy & Security, audio capture list ("Screen & System Audio Recording" on newer macOS)
         let urls = ["x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
                     "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"]
-        for s in urls { if let u = URL(string: s), NSWorkspace.shared.open(u) { return } }
+        for s in urls { if let u = URL(string: s), open(u) { return } }
     }
 
     func setLaunchAtLogin(_ on: Bool) {
+        // Never touch the login item from a UI-test run (the item is shared with the owner's installed app).
+        if options.uiTest { uiTestOpened.append("launch-at-login refused (ui-test run)"); return }
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
@@ -171,6 +221,7 @@ final class AppModel: ObservableObject {
     func shutdown() {
         WindowManager.shared.flushEditor()
         controller.shutdown()
+        if !isPreview { InstanceRegistry.remove() }
     }
 }
 
@@ -207,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 src.resume()
                 signalSources.append(src)
             }
+            if let dir = model.options.uiTestControl { UITestControl.shared.start(dir: dir) }
             if let path = model.options.editorPath {
                 WindowManager.shared.openEditor(path: path)
                 if model.options.smokeTest { SmokeTest.start() }
@@ -251,8 +303,10 @@ struct MenuContent: View {
 
 enum FirstRun {
     static let key = "firstRunCompleted"
+    /// UI-test runs keep the flag in memory (never in the shared user defaults).
+    nonisolated(unsafe) static var uiTestValue = false
     static var completed: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get { LaunchOptions.current.uiTest ? uiTestValue : UserDefaults.standard.bool(forKey: key) }
+        set { if LaunchOptions.current.uiTest { uiTestValue = newValue } else { UserDefaults.standard.set(newValue, forKey: key) } }
     }
 }

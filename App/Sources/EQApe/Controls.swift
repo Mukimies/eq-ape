@@ -1,4 +1,5 @@
 import AppKit
+import EQApeCore
 import SwiftUI
 
 /// Slider over a logarithmic range (frequency, Q). Arrow keys nudge it when focused (NSSlider behaviour).
@@ -36,7 +37,8 @@ struct LinearSlider: View {
     }
 }
 
-/// Numeric text field that commits on Return or when focus leaves (locale decimal separator accepted).
+/// Numeric text field that commits on Return or when focus leaves (locale decimal separator accepted). The parsing
+/// and commit rules are `NumberEntry` (EQApeCore, unit-tested).
 struct NumberField: View {
     var value: Double
     var digits: Int
@@ -46,13 +48,7 @@ struct NumberField: View {
     @State private var text = ""
     @FocusState private var focused: Bool
 
-    private func formatted(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.minimumFractionDigits = 0
-        f.maximumFractionDigits = digits
-        f.usesGroupingSeparator = false
-        return f.string(from: NSNumber(value: v)) ?? "\(v)"
-    }
+    private var entry: NumberEntry { NumberEntry(digits: digits) }
 
     var body: some View {
         TextField(label, text: $text)
@@ -64,20 +60,16 @@ struct NumberField: View {
             .focused($focused)
             .labelsHidden()
             .accessibilityLabel(label)
-            .onAppear { text = formatted(value) }
-            .onChange(of: value) { _, v in if !focused { text = formatted(v) } }
+            .onAppear { text = entry.format(value) }
+            .onChange(of: value) { _, v in if !focused { text = entry.format(v) } }
             .onChange(of: focused) { _, f in if !f { commit() } }
             .onSubmit { commit() }
     }
 
     private func commit() {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        let cleaned = text.trimmingCharacters(in: .whitespaces)
-        if let n = f.number(from: cleaned)?.doubleValue ?? Double(cleaned.replacingOccurrences(of: ",", with: ".")) {
-            if abs(n - value) > 1e-12 { onCommit(n) }
-        }
-        text = formatted(value)
+        let r = entry.commit(text: text, current: value)
+        if let n = r.value { onCommit(n) }
+        text = r.text
     }
 }
 

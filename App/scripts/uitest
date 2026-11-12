@@ -1,0 +1,13 @@
+#!/bin/bash
+# EQ Ape UI-test driver (docs/UI-TESTING.md). Builds the small driver executable on first use and runs it.
+#   scripts/uitest launch [--engine|--no-engine] [--config <file>] [--settings <file>] [--own-identity] [--no-editor] [--in-place]
+#   scripts/uitest do <action> [key=value ...]     e.g. scripts/uitest do click target=editor.add
+#   scripts/uitest state [path]                    e.g. scripts/uitest state editor.selection
+#   scripts/uitest shot <name> [window]            PNG of the app's own window(s) under App/.scratch/uitest/session/ctl/shots/
+#   scripts/uitest quit | status | suite [--out <dir>]
+# Only bundles in App/build-dev/ are launched (build: cd App && BUILD_DIR=build-dev ./bundle.sh).
+set -e
+APP="$(cd "$(dirname "$0")/.." && pwd)"
+swift build --package-path "$APP" --product eqape-uitest >/dev/null
+export EQAPE_APP_DIR="$APP"
+exec "$(swift build --package-path "$APP" --show-bin-path)/eqape-uitest" "$@"

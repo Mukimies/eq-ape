@@ -52,7 +52,7 @@ struct EditorHeader: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(model.rootURL.lastPathComponent).font(.headline)
+                    Text(model.rootURL.lastPathComponent).font(.headline).accessibilityIdentifier("editor.file")
                     if model.isLive {
                         Label("Live", systemImage: "waveform").font(.caption.weight(.semibold))
                             .padding(.horizontal, 6).padding(.vertical, 1)
@@ -78,6 +78,7 @@ struct EditorHeader: View {
                 model.addFilter()
             }
             .fixedSize()
+            .accessibilityIdentifier("editor.add")
             .help("Add a peaking filter after the selected line; the arrow offers graphic EQ lines (variable, 15 or 31 bands)")
             Divider().frame(height: 20)
             Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
@@ -85,14 +86,17 @@ struct EditorHeader: View {
                 .disabled(!model.session.workspace.canUndo)
                 .help(model.session.workspace.undoName.map { "Undo \($0) (⌘Z)" } ?? "Undo (⌘Z)")
                 .accessibilityLabel("Undo")
+                .accessibilityIdentifier("editor.undo")
             Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!model.session.workspace.canRedo)
                 .help(model.session.workspace.redoName.map { "Redo \($0) (⇧⌘Z)" } ?? "Redo (⇧⌘Z)")
                 .accessibilityLabel("Redo")
+                .accessibilityIdentifier("editor.redo")
             Button("Revert to Version at Open") { model.revert() }
                 .disabled(model.session.workspace.modifiedSinceOpen.isEmpty)
                 .help("Restore every file to the bytes it had when the editor opened it (undoable)")
+                .accessibilityIdentifier("editor.revert")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -111,10 +115,10 @@ struct GraphOptionsBar: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            Toggle("Preamp", isOn: $model.showPreamp).help("Include Preamp lines in the plotted curve")
-            Toggle("Anti-clipping gain", isOn: $model.showAntiClip).help("Include the automatic anti-clipping gain the engine applies")
-            Toggle("Selected line", isOn: $model.showSelected).help("Show the selected line's own curve")
-            Toggle("Peak", isOn: $model.showPeak).help("Mark the maximum of the whole chain (every filter, the graphic EQ as played), which sets the anti-clipping gain")
+            Toggle("Preamp", isOn: $model.showPreamp).help("Include Preamp lines in the plotted curve").accessibilityIdentifier("editor.opt.preamp")
+            Toggle("Anti-clipping gain", isOn: $model.showAntiClip).help("Include the automatic anti-clipping gain the engine applies").accessibilityIdentifier("editor.opt.antiClip")
+            Toggle("Selected line", isOn: $model.showSelected).help("Show the selected line's own curve").accessibilityIdentifier("editor.opt.selected")
+            Toggle("Peak", isOn: $model.showPeak).help("Mark the maximum of the whole chain (every filter, the graphic EQ as played), which sets the anti-clipping gain").accessibilityIdentifier("editor.opt.peak")
         }
         .toggleStyle(.checkbox)
         .controlSize(.small)
@@ -161,6 +165,7 @@ struct FilterList: View {
                 }
             }
             .listStyle(.inset(alternatesRowBackgrounds: false))
+            .accessibilityIdentifier("editor.list")
             .environment(\.defaultMinListRowHeight, 26)
             .onDeleteCommand { if let s = model.selection { model.delete(s) } }
             .onAppear { if let s = model.selection { proxy.scrollTo(s, anchor: .center) } }
@@ -196,6 +201,8 @@ struct RowView: View {
             }
     }
 
+    var rid: String { EditorModel.rowID(row.ref) }
+
     @ViewBuilder var content: some View {
         switch row.kind {
         case .command(.filter(let f)):
@@ -213,10 +220,11 @@ struct RowView: View {
             }
             .padding(.top, 4)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("\(rid).label")
         case .command(.include(let path)):
             HStack(spacing: 6) {
                 Image(systemName: "arrow.turn.down.right").foregroundStyle(.secondary)
-                Text("Include: \(path)").font(.system(size: 12))
+                Text("Include: \(path)").font(.system(size: 12)).accessibilityIdentifier("\(rid).label")
                 if model.session.workspace.includes(of: row.ref.url).first(where: { $0.line == row.ref.line })
                     .map({ model.session.workspace.document($0.url) == nil }) ?? true {
                     Text("not found").font(.caption).foregroundStyle(.orange)
@@ -228,12 +236,14 @@ struct RowView: View {
             HStack(spacing: 8) {
                 Text(row.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)
+                    .accessibilityIdentifier("\(rid).text")
                 Spacer()
                 if cmd != nil {
                     Button("Enable") { model.setCommented(row.ref, false) }
                         .controlSize(.small)
                         .help("Remove the # so Equalizer APO syntax on this line takes effect")
                         .accessibilityLabel("Enable commented line")
+                        .accessibilityIdentifier("\(rid).enable")
                 }
             }
         case .unknown(let msg):
@@ -241,6 +251,7 @@ struct RowView: View {
                 if msg != nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).font(.caption) }
                 Text(row.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)
+                    .accessibilityIdentifier("\(rid).text")
             }
             .help(msg ?? "Ignored")
         case .blank:
@@ -272,6 +283,7 @@ struct FilterRowView: View {
                                             ("HPQ", "High-pass (Q)"), ("BP", "Band-pass"), ("NO", "Notch"), ("AP", "All-pass")]
 
     private var key: String { "\(ref.url.path)-\(ref.line)" }
+    private var rid: String { EditorModel.rowID(ref) }
 
     func update(_ name: String, coalesce: String?, _ change: (inout FilterLine) -> Void) {
         var g = f
@@ -296,29 +308,34 @@ struct FilterRowView: View {
             Toggle("On", isOn: Binding(get: { f.enabled }, set: { _ in model.toggleEnabled(ref) }))
                 .toggleStyle(.checkbox).labelsHidden()
                 .accessibilityLabel("Filter \(f.number.map(String.init) ?? "") on")
+                .accessibilityIdentifier("\(rid).on")
             Text(f.number.map { "\($0)" } ?? "–").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
                 .frame(width: 18, alignment: .trailing)
+                .accessibilityIdentifier("\(rid).label")
             Picker("Type", selection: Binding(get: { f.type }, set: { changeType($0) })) {
                 ForEach(typeOptions, id: \.0) { t in Text("\(t.0)  \(t.1)").tag(t.0) }
             }
             .labelsHidden().controlSize(.small).frame(width: 128)
             .accessibilityLabel("Filter type")
+            .accessibilityIdentifier("\(rid).type")
             if f.isNone {
                 Text("Empty filter slot (None). Choose a type to use it.").font(.callout).foregroundStyle(.secondary)
             } else {
                 param("Fc") {
                     LogSlider(value: f.freq ?? 1000, range: 10...22000, label: "Frequency",
                               onChange: { v in update("Change Frequency", coalesce: "fc") { $0.freq = GraphFormat.roundFreq(v) } },
-                              onEnd: model.endGesture).frame(width: 130)
+                              onEnd: model.endGesture).frame(width: 130).accessibilityIdentifier("\(rid).fc")
                     NumberField(value: f.freq ?? 0, digits: 1, label: "Frequency in Hz") { v in update("Change Frequency", coalesce: nil) { $0.freq = max(1, v) } }
+                        .accessibilityIdentifier("\(rid).fc.field")
                     unit("Hz")
                 }
                 param("Gain") {
                     if f.usesGain || f.type == "BP" && f.gainDB != nil {
                         LinearSlider(value: f.gainDB ?? 0, range: -24...24, label: "Gain",
                                      onChange: { v in update("Change Gain", coalesce: "gain") { $0.gainDB = (v * 10).rounded() / 10 } },
-                                     onEnd: model.endGesture).frame(width: 110)
+                                     onEnd: model.endGesture).frame(width: 110).accessibilityIdentifier("\(rid).gain")
                         NumberField(value: f.gainDB ?? 0, digits: 2, label: "Gain in dB", width: 52) { v in update("Change Gain", coalesce: nil) { $0.gainDB = v } }
+                            .accessibilityIdentifier("\(rid).gain.field")
                         unit("dB")
                     } else {
                         Text("—").foregroundStyle(.tertiary).frame(width: 110 + 52 + 22 + 8, alignment: .leading)
@@ -328,24 +345,27 @@ struct FilterRowView: View {
                     param("Slope") {
                         LinearSlider(value: f.slopeDB ?? 10.8, range: 3...24, label: "Slope",
                                      onChange: { v in update("Change Slope", coalesce: "slope") { $0.slopeDB = (v * 2).rounded() / 2 } },
-                                     onEnd: model.endGesture).frame(width: 90)
+                                     onEnd: model.endGesture).frame(width: 90).accessibilityIdentifier("\(rid).slope")
                         NumberField(value: f.slopeDB ?? 10.8, digits: 1, label: "Slope in dB per octave", width: 46) { v in update("Change Slope", coalesce: nil) { $0.slopeDB = v } }
+                            .accessibilityIdentifier("\(rid).slope.field")
                         unit("dB/oct")
                     }
                 } else if f.bandwidthOct != nil && !f.isShelf {
                     param("BW") {
                         LogSlider(value: f.bandwidthOct ?? 1, range: 0.05...10, label: "Bandwidth",
                                   onChange: { v in update("Change Bandwidth", coalesce: "bw") { $0.bandwidthOct = GraphFormat.roundQ(v) } },
-                                  onEnd: model.endGesture).frame(width: 90)
+                                  onEnd: model.endGesture).frame(width: 90).accessibilityIdentifier("\(rid).bw")
                         NumberField(value: f.bandwidthOct ?? 1, digits: 3, label: "Bandwidth in octaves", width: 46) { v in update("Change Bandwidth", coalesce: nil) { $0.bandwidthOct = max(0.01, v) } }
+                            .accessibilityIdentifier("\(rid).bw.field")
                         unit("oct")
                     }
                 } else if !["LP", "HP"].contains(f.type) || f.q != nil || f.isShelf {
                     param("Q") {
                         LogSlider(value: f.q ?? (f.isShelf ? 0.707 : 1), range: 0.1...30, label: "Q",
                                   onChange: { v in update("Change Q", coalesce: "q") { $0.q = GraphFormat.roundQ(v) } },
-                                  onEnd: model.endGesture).frame(width: 90)
+                                  onEnd: model.endGesture).frame(width: 90).accessibilityIdentifier("\(rid).q")
                         NumberField(value: f.q ?? 0, digits: 3, label: "Q", width: 52) { v in update("Change Q", coalesce: nil) { $0.q = max(0.01, v) } }
+                            .accessibilityIdentifier("\(rid).q.field")
                     }
                 } else {
                     Text("Q 0.707 (Butterworth)").font(.caption).foregroundStyle(.secondary)
@@ -356,6 +376,7 @@ struct FilterRowView: View {
             Button { model.delete(ref) } label: { Image(systemName: "trash") }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
                 .help("Delete this line").accessibilityLabel("Delete filter")
+                .accessibilityIdentifier("\(rid).delete")
         }
         .opacity(f.enabled ? 1 : 0.55)
         .padding(.vertical, 1)
@@ -391,15 +412,19 @@ struct PreampRowView: View {
         HStack(spacing: 8) {
             Image(systemName: "dial.low").foregroundStyle(.secondary).frame(width: 44)
             Text("Preamp").font(.system(size: 12, weight: .semibold)).frame(width: 128, alignment: .leading)
+                .accessibilityIdentifier("\(EditorModel.rowID(ref)).label")
             LinearSlider(value: db, range: -30...12, label: "Preamp",
                          onChange: { v in model.set(.preamp(dB: (v * 10).rounded() / 10), at: ref, name: "Change Preamp", coalesce: "preamp-\(ref.line)") },
                          onEnd: model.endGesture).frame(width: 240)
+                .accessibilityIdentifier("\(EditorModel.rowID(ref)).preamp")
             NumberField(value: db, digits: 2, label: "Preamp in dB", width: 56) { v in model.set(.preamp(dB: v), at: ref, name: "Change Preamp") }
+                .accessibilityIdentifier("\(EditorModel.rowID(ref)).preamp.field")
             Text("dB").font(.system(size: 10)).foregroundStyle(.secondary)
             ChannelBadge(channels: channels)
             Spacer()
             Button { model.delete(ref) } label: { Image(systemName: "trash") }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Delete preamp")
+                .accessibilityIdentifier("\(EditorModel.rowID(ref)).delete")
         }
     }
 }
@@ -410,6 +435,7 @@ struct GraphicEQRowView: View {
     let points: [GraphicEQPoint]
     let channels: String?
     var active = true
+    private var rid: String { EditorModel.rowID(ref) }
 
     var body: some View {
         let layout = model.geqLayout(ref)
@@ -424,7 +450,8 @@ struct GraphicEQRowView: View {
                     .controlSize(.small)
                     .help(active ? "On: click to comment the line out (#), as Equalizer APO does" : "Off (commented out): click to enable")
                     .accessibilityLabel("Graphic EQ on")
-                    Text("Graphic EQ").font(.system(size: 12, weight: .semibold))
+                    .accessibilityIdentifier("\(rid).power")
+                    Text("Graphic EQ").font(.system(size: 12, weight: .semibold)).accessibilityIdentifier("\(rid).label")
                     ChannelBadge(channels: channels)
                 }
                 Picker("Bands", selection: Binding(get: { layout }, set: { model.setGEQLayout($0, for: ref) })) {
@@ -436,18 +463,21 @@ struct GraphicEQRowView: View {
                 .disabled(!active)
                 .help("15-band and 31-band lock the frequencies to the standard bands; Variable lets you move, add and remove nodes")
                 .accessibilityLabel("Band mode")
+                .accessibilityIdentifier("\(rid).mode")
                 Text("\(points.count) nodes").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 4) {
                     Button("Sliders…") { model.selection = ref; model.editingGraphicEQ = ref }
                         .controlSize(.small)
                         .help("Edit the bands with vertical sliders in a sheet")
+                        .accessibilityIdentifier("\(rid).sliders")
                     Button { model.delete(ref) } label: { Image(systemName: "trash") }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Delete graphic EQ")
+                        .accessibilityIdentifier("\(rid).delete")
                 }
             }
             .frame(width: 118, alignment: .leading)
             if let o = overlay {
-                GEQRowGraph(overlay: o, onGEQ: { model.handleGEQ($0) })
+                GEQRowGraph(overlay: o, idPrefix: rid, onGEQ: { model.handleGEQ($0) })
                     .frame(height: 150)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -474,9 +504,11 @@ struct GEQNodeFields: View {
                 let p = overlay.points[i]
                 Text("Node \(i + 1) of \(overlay.points.count)").font(.caption.weight(.semibold))
                 NumberField(value: p.freq, digits: 2, label: "Node frequency in Hz", width: 64) { model.setGEQNode(overlay.ref, i, freq: $0) }
+                    .accessibilityIdentifier("editor.node.freq")
                     .disabled(overlay.locked || !overlay.editable)
                 Text("Hz").font(.caption).foregroundStyle(.secondary)
                 NumberField(value: p.gainDB, digits: 2, label: "Node gain in dB", width: 52) { model.setGEQNode(overlay.ref, i, gain: $0) }
+                    .accessibilityIdentifier("editor.node.gain")
                     .disabled(!overlay.editable)
                 Text("dB").font(.caption).foregroundStyle(.secondary)
                 if !overlay.locked {
@@ -485,6 +517,7 @@ struct GEQNodeFields: View {
                         .disabled(overlay.points.count <= GraphicEQEditing.minNodes || !overlay.editable)
                         .help("Remove this node (also: double-click it, or Delete)")
                         .accessibilityLabel("Remove node")
+                        .accessibilityIdentifier("editor.node.remove")
                 }
                 Text(overlay.locked ? "fixed bands: ↕ only" : "⇧ one axis · arrows nudge")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -538,9 +571,12 @@ struct StatusStrip: View {
             }
             .frame(minWidth: 120, maxWidth: 230, alignment: .leading)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("editor.status.engine")
             VStack(spacing: 2) {
                 LevelMeter(label: "In", db: app.inputDB, peakHold: app.inputHoldDB, clip: false, enabled: active)
+                    .accessibilityIdentifier("editor.meter.in")
                 LevelMeter(label: "Out", db: app.outputDB, peakHold: app.outputHoldDB, clip: app.clipRecently, enabled: active)
+                    .accessibilityIdentifier("editor.meter.out")
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("Anti-clip").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -549,6 +585,7 @@ struct StatusStrip: View {
                     .font(.system(size: 11).monospacedDigit())
             }
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("editor.status.antiClip")
             Toggle(isOn: Binding(get: { st.abBypass }, set: { app.setBypass($0) })) {
                 Text(st.abBypass ? "Bypassed (B)" : "EQ on (A)").frame(minWidth: 76)
             }
@@ -556,9 +593,11 @@ struct StatusStrip: View {
             .disabled(!active)
             .help("A/B: play the audio without the EQ while held on. The engine keeps running.")
             .accessibilityLabel("Bypass")
+            .accessibilityIdentifier("editor.status.bypass")
             Spacer(minLength: 6)
             if let n = model.notice {
                 Text(n).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityIdentifier("editor.status.notice")
                     .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 6) { if model.notice == n { model.notice = nil } } }
             }
             if let err = model.session.lastError {
@@ -571,6 +610,7 @@ struct StatusStrip: View {
                       systemImage: model.warnings.isEmpty ? "checkmark.circle" : "exclamationmark.triangle")
             }
             .disabled(model.warnings.isEmpty)
+            .accessibilityIdentifier("editor.status.warnings")
             .popover(isPresented: $showWarnings, arrowEdge: .top) { WarningsList(model: model, dismiss: { showWarnings = false }) }
         }
         .controlSize(.small)
@@ -595,6 +635,7 @@ struct WarningsList: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("warnings.item.\(w.id + 1)")
                     }
                 }
             }
@@ -628,12 +669,8 @@ struct GraphicEQEditor: View {
         let r = max(12, (ceil((maxAbs + 1) / 3)) * 3)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Graphic EQ").font(.title3.weight(.semibold))
-                    Text("\(ref.url.lastPathComponent), line \(ref.line + 1) · \(pts.count) bands · changes are saved and heard while you drag")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
+                Text("Graphic EQ").font(.title3.weight(.semibold)).fixedSize()
+                Spacer(minLength: 12)
                 Picker("Mode", selection: Binding(get: { layout }, set: { if model.setGEQLayout($0, for: ref) { selected = nil } })) {
                     Text("Fixed: 15 bands").tag(GraphicEQEditing.Layout.fixed15)
                     Text("Fixed: 31 bands").tag(GraphicEQEditing.Layout.fixed31)
@@ -641,15 +678,24 @@ struct GraphicEQEditor: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 330)
+                .frame(minWidth: 260, idealWidth: 330, maxWidth: 330)
                 .help("Fixed bands: frequencies locked to the standard bands. Variable: every node's frequency is editable. Converting to fixed bands resamples the curve (asks first).")
                 .accessibilityLabel("Band mode")
+                .accessibilityIdentifier("geq.mode")
                 Button("Flatten") { write(pts.map { GraphicEQPoint(freq: $0.freq, gainDB: 0) }) }
                     .help("Set every band to 0 dB")
-                Button("Add Band") { addBand() }.disabled(pts.isEmpty || !variable)
+                    .fixedSize()
+                    .accessibilityIdentifier("geq.flatten")
+                Button("Add Band") { addBand() }.disabled(pts.isEmpty || !variable).fixedSize().accessibilityIdentifier("geq.addBand")
                 Button("Remove Band") { removeBand() }.disabled(selected == nil || pts.count <= GraphicEQEditing.minNodes || !variable)
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                    .fixedSize()
+                    .accessibilityIdentifier("geq.removeBand")
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).accessibilityIdentifier("geq.done")
             }
+            .fixedSize(horizontal: false, vertical: true)
+            // on its own line: next to the controls it was squeezed into a narrow wrapped column (seen in a UI-test shot)
+            Text("\(ref.url.lastPathComponent), line \(ref.line + 1) · \(pts.count) bands · changes are saved and heard while you drag")
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             GraphicEQCurve(points: pts, range: r, selectedFreq: selected.flatMap { pts.indices.contains($0) ? pts[$0].freq : nil })
                 .frame(height: 70)
             ScrollView(.horizontal) {
@@ -666,11 +712,13 @@ struct GraphicEQEditor: View {
                                            },
                                            onEnd: model.endGesture)
                                 .frame(width: 26, height: 190)
+                                .accessibilityIdentifier("geq.band.\(i + 1)")
                             if variable {
                                 NumberField(value: p.freq, digits: 1, label: "Band \(i + 1) frequency in Hz", width: 44) { v in
                                     selected = i
                                     model.setGEQNode(ref, i, freq: v)
                                 }
+                                .accessibilityIdentifier("geq.band.\(i + 1).freq")
                             } else {
                                 Text(GraphicEQEditor.short(p.freq)).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
                                     .fixedSize()
@@ -688,9 +736,11 @@ struct GraphicEQEditor: View {
                 HStack(spacing: 8) {
                     Text("Selected band:").font(.callout)
                     NumberField(value: pts[i].freq, digits: 2, label: "Band frequency in Hz", width: 70) { v in model.setGEQNode(ref, i, freq: v) }
+                        .accessibilityIdentifier("geq.selected.freq")
                         .disabled(!variable)
                     Text("Hz").font(.caption).foregroundStyle(.secondary)
                     NumberField(value: pts[i].gainDB, digits: 2, label: "Band gain in dB", width: 56) { v in model.setGEQNode(ref, i, gain: v) }
+                        .accessibilityIdentifier("geq.selected.gain")
                     Text("dB").font(.caption).foregroundStyle(.secondary)
                     if !variable { Text("Frequencies are locked in fixed-band mode.").font(.caption).foregroundStyle(.secondary) }
                 }

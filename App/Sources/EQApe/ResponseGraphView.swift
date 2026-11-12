@@ -139,6 +139,30 @@ struct GraphData {
 
 enum GraphDragPhase { case began, changed, ended, scroll }
 
+/// An accessibility child of a graph view (a filter handle or a GraphicEQ node): a button for VoiceOver (press =
+/// select, increment/decrement = ±0.5 dB) with a stable identifier, which the UI-test channel also uses to aim.
+final class GraphPartElement: NSAccessibilityElement {
+    var onPress: (() -> Void)?
+    var onAdjust: ((Double) -> Void)?
+    override func accessibilityPerformPress() -> Bool { onPress?(); return onPress != nil }
+    override func accessibilityPerformIncrement() -> Bool { onAdjust?(0.5); return onAdjust != nil }
+    override func accessibilityPerformDecrement() -> Bool { onAdjust?(-0.5); return onAdjust != nil }
+
+    /// Reuse elements by identifier so VoiceOver's focus survives redraws.
+    static func element(_ cache: inout [String: GraphPartElement], id: String, parent: NSView, frameInView r: NSRect,
+                        label: String, value: String) -> GraphPartElement {
+        let e = cache[id] ?? GraphPartElement()
+        cache[id] = e
+        e.setAccessibilityIdentifier(id)
+        e.setAccessibilityParent(parent)
+        e.setAccessibilityRole(.button)
+        e.setAccessibilityLabel(label)
+        e.setAccessibilityValue(value)
+        e.setAccessibilityFrame(NSAccessibility.screenRect(fromView: parent, rect: r))
+        return e
+    }
+}
+
 /// The frequency-response graph: log frequency 20 Hz-20 kHz, auto-scaled dB axis (at least ±12 dB), combined or
 /// L/R curves, the selected line's own curve, the peak marker, hover read-out and draggable filter handles.
 final class ResponseGraphNSView: NSView {
@@ -162,8 +186,44 @@ final class ResponseGraphNSView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         setAccessibilityElement(true)
-        setAccessibilityRole(.image)
+        setAccessibilityRole(.group)
         setAccessibilityLabel("Frequency response graph")
+        setAccessibilityIdentifier("editor.graph")
+    }
+
+    private var partCache: [String: GraphPartElement] = [:]
+
+    /// Handles ("graph.handle.<file>:<line>") and the selected GraphicEQ line's nodes ("graph.node.<n>").
+    override func accessibilityChildren() -> [Any]? {
+        var out: [Any] = []
+        for h in data.handles {
+            let c = NSPoint(x: x(h.freq), y: y(h.gain))
+            let id = "graph.handle.\(h.ref.url.lastPathComponent):\(h.ref.line + 1)"
+            let e = GraphPartElement.element(&partCache, id: id, parent: self, frameInView: NSRect(x: c.x - 7, y: c.y - 7, width: 14, height: 14),
+                                             label: "Filter \(h.label) handle\(h.enabled ? "" : ", off")",
+                                             value: GraphFormat.freq(h.freq) + String(format: ", %+.1f dB, Q %.3g", h.gain, h.q))
+            let ref = h.ref
+            e.onPress = { [weak self] in self?.onSelect?(ref) }
+            e.onAdjust = { [weak self] d in
+                guard let self, let cur = self.data.handles.first(where: { $0.ref == ref }) else { return }
+                self.onDrag?(ref, cur.freq, cur.gain + d, cur.q, .changed)
+                self.onDrag?(ref, cur.freq, cur.gain + d, cur.q, .ended)
+            }
+            out.append(e)
+        }
+        if let g = data.geq {
+            for (i, p) in g.points.enumerated() {
+                let c = nodePos(p)
+                let e = GraphPartElement.element(&partCache, id: "graph.node.\(i + 1)", parent: self,
+                                                 frameInView: NSRect(x: c.x - 7, y: c.y - 7, width: 14, height: 14),
+                                                 label: "Graphic EQ node \(i + 1)", value: GEQNodeStyle.readout(p, index: i))
+                let ref = g.ref
+                e.onPress = { [weak self] in self?.onGEQ?(.select(ref, i)) }
+                e.onAdjust = { [weak self] d in self?.onGEQ?(.nudge(ref, i, 0, d)) }
+                out.append(e)
+            }
+        }
+        return out
     }
     required init?(coder: NSCoder) { fatalError() }
 

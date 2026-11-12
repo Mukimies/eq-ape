@@ -32,6 +32,7 @@ struct SettingsView: View {
                                 }
                                 Spacer()
                                 Button("Choose Config File…") { app.chooseConfig(forUID: uid) }
+                                    .accessibilityIdentifier("settings.current.choose")
                             }
                         }
                     }
@@ -43,9 +44,10 @@ struct SettingsView: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Launch EQ Ape at login", isOn: Binding(get: { app.launchAtLogin }, set: { app.setLaunchAtLogin($0) }))
+                            .accessibilityIdentifier("settings.launchAtLogin")
                         HStack {
-                            Button("Open Settings Folder") { app.openSettingsFolder() }
-                            Button("Open Editor Backups") { app.openBackupsFolder() }
+                            Button("Open Settings Folder") { app.openSettingsFolder() }.accessibilityIdentifier("settings.openSettingsFolder")
+                            Button("Open Editor Backups") { app.openBackupsFolder() }.accessibilityIdentifier("settings.openBackups")
                         }
                         if app.controller.settingsReadOnly {
                             Text("Development run (--no-engine): changes here are not saved to settings.json.")
@@ -68,7 +70,7 @@ struct SettingsView: View {
                         Text("macOS asks the first time the engine starts. Answer the prompt promptly: while it is open, no app on the Mac can start new audio. If you declined, allow EQ Ape in System Settings, then choose Reload in the menu.")
                             .fixedSize(horizontal: false, vertical: true)
                             .foregroundStyle(.secondary)
-                        Button("Open Privacy & Security Settings…") { app.openPrivacySettings() }
+                        Button("Open Privacy & Security Settings…") { app.openPrivacySettings() }.accessibilityIdentifier("settings.privacy")
                     }
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -86,6 +88,8 @@ struct ProfileRow: View {
     @ObservedObject var app: AppModel
     let uid: String
     let profile: DeviceProfile
+    /// Accessibility identifier stem: "settings.profile.<device UID>".
+    var pid: String { "settings.profile.\(uid)" }
 
     func update(_ change: (inout DeviceProfile) -> Void) {
         var p = profile
@@ -108,6 +112,7 @@ struct ProfileRow: View {
                 Toggle("Enabled", isOn: Binding(get: { profile.enabled }, set: { v in update { $0.enabled = v } }))
                     .toggleStyle(.switch).controlSize(.small)
                     .accessibilityLabel("EQ enabled for \(profile.deviceName)")
+                    .accessibilityIdentifier("\(pid).enabled")
             }
             HStack(spacing: 8) {
                 Text("Config").foregroundStyle(.secondary).frame(width: 74, alignment: .leading)
@@ -116,14 +121,16 @@ struct ProfileRow: View {
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                 Spacer()
-                Button("Choose…") { app.chooseConfig(forUID: uid) }
+                Button("Choose…") { app.chooseConfig(forUID: uid) }.accessibilityIdentifier("\(pid).choose")
                 Button("Edit…") { if let p = profile.configPath { WindowManager.shared.openEditor(path: p) } }
                     .disabled(profile.configPath == nil)
+                    .accessibilityIdentifier("\(pid).edit")
             }
             HStack(spacing: 8) {
                 Text("Anti-clip").foregroundStyle(.secondary).frame(width: 74, alignment: .leading)
                 Toggle("Automatic anti-clipping gain", isOn: Binding(get: { profile.headroomEnabled }, set: { v in update { $0.headroomEnabled = v } }))
                     .toggleStyle(.checkbox)
+                    .accessibilityIdentifier("\(pid).antiClip")
                     .help("Lowers the level by the largest boost of the whole EQ (every filter, high-pass included) plus the headroom, so a steady tone at full scale stays below 0 dBFS. It does not make clipping impossible: the EQ's phase shifts can raise short peaks of already loud music by a few dB. The clip light shows when that happens.")
                 Spacer()
                 Text("Headroom").foregroundStyle(.secondary)
@@ -133,9 +140,11 @@ struct ProfileRow: View {
                 }
                 .disabled(!profile.headroomEnabled)
                 .accessibilityLabel("Headroom")
+                .accessibilityIdentifier("\(pid).headroom")
                 .accessibilityValue(String(format: "%.1f dB", profile.headroomDB))
                 Button("Remove") { app.controller.setProfile(uid: uid, nil) }
                     .help("Forget this device: its audio is left untouched")
+                    .accessibilityIdentifier("\(pid).remove")
             }
         }
     }
@@ -160,14 +169,14 @@ struct FirstRunView: View {
             .labelStyle(.titleAndIcon)
             HStack {
                 Spacer()
-                Button("Not Now") { FirstRun.completed = true; close() }
+                Button("Not Now") { FirstRun.completed = true; close() }.accessibilityIdentifier("firstRun.notNow")
                 Button("Choose Config File…") {
                     FirstRun.completed = true
                     close()
                     app.chooseConfig()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(app.engineDisabled && false)
+                .accessibilityIdentifier("firstRun.choose")
             }
         }
         .padding(22)

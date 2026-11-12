@@ -1,0 +1,9 @@
+#!/bin/bash
+# EQ Ape real-input helper (docs/UI-TESTING.md): real CGEvents and real screenshots against the dev instance started by
+# scripts/uitest launch. Needs the terminal's Accessibility (events, tree) and Screen Recording (shot) permissions;
+# `scripts/uidrive perms` checks them without prompting. Every command accepts --dry-run.
+set -e
+APP="$(cd "$(dirname "$0")/.." && pwd)"
+swift build --package-path "$APP" --product eqape-uidrive >/dev/null
+export EQAPE_APP_DIR="$APP"
+exec "$(swift build --package-path "$APP" --show-bin-path)/eqape-uidrive" "$@"

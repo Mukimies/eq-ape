@@ -140,6 +140,9 @@ GPL; EQ Ape is source-available under Apache-2.0 with the Commons Clause.
   | `--backup-dir <dir>` | Write editor backups here. |
   | `--render-snapshots <dir>` | Render the views to PNG and exit; implies no engine. |
   | `--smoke-test` | Drive the editor in-process. |
+  | `--require-granted` | Start an engine only if no permission prompt can appear (see `APP-NOTES.md`). |
+  | `--print-permission` | Print the permission preflights and the code identity, then exit. |
+  | `--ui-test-control <dir>` | File-based test channel (`docs/UI-TESTING.md`). |
 
   SIGTERM, SIGINT and SIGHUP flush pending editor saves, stop the controller and exit 0.
 - Accessibility: every slider, field, toggle and button has a VoiceOver label (with a value where useful). The band
@@ -237,14 +240,10 @@ window is never key.
   - Undoing every step restored the original bytes exactly; redo changed them again; undo restored them.
   - The band-editor sheet attached. The Settings window opened.
   - A backup folder with `manifest.txt` was created in the scratch backup directory.
-- Not exercised in the running GUI:
+- Not exercised in the running GUI (as of this section; the 2026-11-12 UI-testing update below moved several items to
+  "exercised by script"):
   - Clicking or typing by a person.
-  - Keyboard focus and Tab order.
   - VoiceOver.
-  - Real scroll-wheel events.
-  - List drag-reordering.
-  - Popovers and alerts.
-  - NSOpenPanel.
   - The meters with real audio.
   - The A/B bypass with a running engine. Its controller code path has no unit test and was never run with audio.
   - The first-run window on a fresh install.
@@ -385,6 +384,40 @@ the original bytes.
   test only switched fixed → Variable, which needs no confirmation), the power toggle, the "Add" menu items, and trackpad
   or real mouse feel. Nothing of this update was run with the audio engine; the new anti-clipping gain was verified with
   the processor in tests and a scratch probe, not heard.
+
+## Update 2026-11-12: UI-test tooling, what is now exercised by script
+
+Tools: `docs/UI-TESTING.md` (in-app channel, `App/scripts/uitest suite`, `App/scripts/uidrive`). All runs used a
+`--no-engine` dev instance from `App/build-dev/` on a generated scratch config; nothing in `App/build/` was touched.
+
+**Exercised by script** (the suite, real AppKit events posted into the app at the controls' on-screen positions):
+keyboard focus and Tab order within a row; arrow-key nudges, Tab / ⇧Tab and Delete on GraphicEQ nodes (main graph and
+row graph); Delete key and trash button on rows; number-field entry committed by Return and by Tab (decimal comma,
+invalid text); the Type pop-up; the 15-band / 31-band / Variable conversion alert (Cancel and Convert); the GraphicEQ
+power toggle and the filter On checkbox; the context menu (Turn On/Off, Comment Out, Enable); Enable on commented lines;
+every Add-menu item; undo/redo (⌘Z, ⇧⌘Z, toolbar) across all of these, ending with byte-identical files; the warnings
+popover and its jump; the band-slider sheet; Revert; the menu bar extra's menu; every Settings control except Launch at
+Login, including the Choose… open panel (opened and cancelled); the first-run window; window resize to the minimum;
+synthesised scroll events over a handle; dark appearance. Real input (`uidrive pass`, real pointer and keys): see its
+results in the report of that run; list drag-reordering only works with the real pointer.
+
+**Bugs the suite found and that were fixed** (each with a regression check):
+- Return in a number field lost the typed value: the field committed it, showed the old value again (the view had
+  not updated yet), and the focus change Return causes committed that old value back. Tab worked. Fixed in
+  `NumberEntry` (EQApeCore), unit-tested in `NumberEntryTests`; confirmed with a real Return key.
+- Opening the first-run window could crash the app (AppKit exception "needs update constraints" from
+  `NSHostingController`'s `.preferredContentSize` sizing). That window only appears on a fresh install, so a new user
+  could have hit it at first launch. Fixed by measuring the fixed-size window once; the suite opens it six times in
+  both appearances.
+
+**Known issues found**
+- Tab stops after a row's last field (it goes to the graph, then the list); it does not continue into the next row's
+  fields. Not fixed.
+- Accessibility: interactive controls now all have identifiers (`audit` reports none missing in the editor, sheet and
+  Settings); filter handles and nodes are VoiceOver buttons. VoiceOver speech itself was not listened to.
+
+**Still not exercised:** VoiceOver by a person, trackpad feel, the conflict alert, the meters and A/B bypass with
+audio, `SMAppService`, the first-run window on a really fresh install (it was opened, not reached by a first launch).
 
 ## Switching from the running build to the new one
 

@@ -61,7 +61,9 @@ if [ "${SKIP_TESTS:-}" != "1" ]; then
 fi
 
 echo "==> bundle (arm64, ad-hoc signed)"
-EQAPE_VERSION="$NUMERIC" EQAPE_BUILD="$BUILD" EQAPE_RELEASE_LABEL="$VERSION" ./App/bundle.sh
+# SIGN_IDENTITY=- forces the ad-hoc signature: a local development identity ("EQ Ape Local Dev") must never leak into
+# a release. In signed mode dist/make-dmg.sh re-signs the app with $DEVELOPER_ID afterwards.
+SIGN_IDENTITY=- EQAPE_VERSION="$NUMERIC" EQAPE_BUILD="$BUILD" EQAPE_RELEASE_LABEL="$VERSION" ./App/bundle.sh
 APP="$ROOT/App/build/EQ Ape.app"
 [ -d "$APP" ] || die "bundle.sh did not produce $APP"
 [ "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$NUMERIC" ] || die "version stamp missing in Info.plist"

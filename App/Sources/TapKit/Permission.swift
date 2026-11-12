@@ -24,3 +24,8 @@ public enum Permission {
         }
     }
 }
+
+extension Permission {
+    /// Microphone (TCC `kTCCServiceMicrophone`) for the responsible process, read-only, never prompts.
+    public static func microphone() -> State { preflight("kTCCServiceMicrophone") }
+}
