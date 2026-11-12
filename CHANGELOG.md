@@ -5,7 +5,7 @@ All notable changes to EQ Ape are documented here. The format follows [Keep a Ch
 ## [Unreleased]
 
 ### Added
-- `--require-granted`: the GUI starts an engine only when the no-prompt preflights say no permission prompt can appear (audio capture granted; Microphone decided when the device has inputs); otherwise the engine stays off with the state "engine off: …". `--print-permission` prints the preflights and the code-signing identity.
+- `--require-granted`: the GUI starts an engine only when the no-prompt preflights say no permission prompt can appear (audio capture granted); otherwise the engine stays off with the state "engine off: …". `--print-permission` prints the preflights and the code-signing identity.
 - Instance guard: an EQ Ape process keeps its engine off while another one may be processing the same output device (per-user instance registry and per-device lock, no sockets), so two taps never process the audio twice.
 - Development tooling for validating GUI changes (`docs/UI-TESTING.md`): an in-app file-based command channel (`--ui-test-control`), the `App/scripts/uitest` driver with a scripted end-to-end suite and window screenshots, the `App/scripts/uidrive` real-input helper, and a non-blocking CI step for the suite.
 - Accessibility identifiers on every interactive control; filter handles and graphic EQ nodes are exposed to VoiceOver as buttons (press selects, increment/decrement changes the gain by 0.5 dB).

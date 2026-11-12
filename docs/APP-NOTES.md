@@ -166,9 +166,8 @@ Before any tap is created, `TapController.startGate` asks two questions (pure lo
 unit-tested in `EngineGateTests`):
 
 - **Permission gate** (`--require-granted`): audio capture must be "granted" for the responsible process
-  (`TCCAccessPreflight`, read-only) and, when the device has input streams, the Microphone status
-  (`AVCaptureDevice.authorizationStatus(for: .audio)`, never prompts) must be decided; "not determined" or unknown is
-  unsafe. Otherwise the state is `.held("…")`, shown as "engine off: …" in the menu and the editor, printed on stdout,
+  (`TCCAccessPreflight`, read-only). The Microphone status is reported but no longer gates (see "Result
+  2026-11-12" below). Otherwise the state is `.held("…")`, shown as "engine off: …" in the menu and the editor, printed on stdout,
   and re-checked every 5 s. No tap or aggregate exists while held.
 - **Instance guard** (always): see `docs/UI-TESTING.md`, "Several instances". A per-user registry
   (`$TMPDIR/org.eqape.EQApe.instances/<pid>.json`), a per-device `flock` held while an engine exists, and a process-table
@@ -188,8 +187,7 @@ grant given once should keep applying. `App/bundle.sh` uses such an identity ("E
 when present on a local build; CI and `dist/release.sh` stay ad hoc (Developer ID via `make-dmg.sh`). How to create the
 identity: `CONTRIBUTING.md`.
 
-Verified without any prompt: see "Permission persistence check" below. Not yet verified: that TCC actually honours
-the grant across a rebuild (needs one prompt answered by the owner; procedure below).
+Verified: the audio-capture grant survives a rebuild (see "Result 2026-11-12" under "Permission persistence check").
 
 ## Permission persistence check (2026-11-12, no prompt raised)
 
@@ -230,6 +228,21 @@ test stopped there (no prompt was raised, TCC was not touched).
 
 Note: from now on `./bundle.sh` signs `App/build/` with "EQ Ape Local Dev" too when that identity exists (set
 `SIGN_IDENTITY=-` to keep ad hoc). The first launch of such a build is a new identity for TCC: expect one prompt.
+
+### Result 2026-11-12 (owner present)
+
+The procedure above was run with `build-dev/perm`. **Pass for audio capture.**
+
+- First build (cdhash `2f6f5cab…`): one prompt appeared, the owner allowed it; the engine started on the Scarlett
+  Solo USB and `--print-permission` (own responsible process) reported audio capture "granted".
+- Rebuild with a different build number (cdhash `6a2f0aa7…`, same designated requirement): `--print-permission`
+  reported audio capture "granted" with no prompt.
+- Microphone stayed "not determined" in both builds, and the first build's engine ran on the Scarlett (2 input
+  streams in the aggregate, input stream usage disabled in the IOProc) without a Microphone prompt. The owner saw
+  one prompt and does not recall its wording; the audio-capture status changing to "granted" identifies it. Because
+  of this the Microphone status no longer gates `--require-granted`. Observed on this one device only.
+- Not done: step 6's "menu shows active" check. The gate at that time still held the engine for Microphone, so the
+  rebuilt copy's engine was never started.
 
 ## Device inputs in the aggregate (the `channels-in: 0` question)
 

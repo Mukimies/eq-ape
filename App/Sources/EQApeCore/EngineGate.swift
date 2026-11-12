@@ -7,9 +7,9 @@ import Foundation
 ///    with a tap makes coreaudiod ask TCC for the audio-capture permission and blocks until the prompt is answered;
 ///    while such a prompt is pending no process on the Mac can start new audio. With the gate on, the engine starts
 ///    only when the no-prompt preflights say no prompt can appear: audio capture must be "granted" for the
-///    responsible process, and, when the device has input streams (they end up in the aggregate, which can raise a
-///    second, Microphone, check), the Microphone status must be decided (authorized, denied or restricted; "not
-///    determined" or unknown is unsafe).
+///    responsible process. The Microphone status is reported but does not gate: the engine disables the device's
+///    input streams in its IOProc, and on 2026-11-12 it ran on a Scarlett Solo USB (2 input streams) with Microphone
+///    "not determined" and raised no Microphone prompt. Observed on that one device only.
 /// 2. **Instance guard** (always on in the GUI): two taps on one device would process the audio twice. Another
 ///    EQ Ape process blocks the engine unless it has declared, in the instance registry, that its engine is off or
 ///    that it processes a different device. A process without a registry entry (an older build) is assumed to be
@@ -36,13 +36,6 @@ public enum EngineGate {
         guard requireGranted else { return nil }
         if p.capture != .granted {
             return "audio-capture permission is \(p.capture.rawValue) for this process (--require-granted: starting would raise a prompt)"
-        }
-        if p.deviceHasInputs {
-            switch p.microphone {
-            case .authorized, .denied, .restricted: break
-            case .notDetermined, .unknown:
-                return "microphone permission is \(p.microphone.rawValue) and the device has inputs (--require-granted: starting could raise a Microphone prompt)"
-            }
         }
         return nil
     }

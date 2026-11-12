@@ -23,9 +23,8 @@ An unanswered audio-capture or Microphone prompt freezes all new audio on the Ma
 The rules the tooling enforces:
 
 - `--require-granted`: the app checks the no-prompt preflights before any tap is created: the audio-capture permission
-  must be "granted" for the responsible process, and, when the output device has inputs (they end up in the
-  aggregate and can trigger a second, Microphone, check), the Microphone status (`AVCaptureDevice.authorizationStatus`)
-  must be decided ("not determined" is unsafe). Otherwise the engine stays off with the state
+  must be "granted" for the responsible process. The Microphone status is reported but does not gate (no Microphone
+  prompt was observed on a Scarlett Solo USB with the status "not determined"; `docs/APP-NOTES.md`). Otherwise the engine stays off with the state
   `engine off: <reason>` (menu, status strip, `state`) and a line on stdout. It re-checks every 5 s. Every scripted
   or unattended launch uses it; `uitest` always passes it.
 - `--no-engine` never creates taps or starts device I/O. It is `uitest`'s default and the only mode the suite uses.

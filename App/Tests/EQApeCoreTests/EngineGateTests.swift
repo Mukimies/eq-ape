@@ -20,15 +20,12 @@ final class EngineGateTests: XCTestCase {
         }
     }
 
-    func testMicrophoneMattersOnlyForDevicesWithInputs() {
-        // no inputs: the aggregate holds only the tap, no Microphone check
-        XCTAssertNil(EngineGate.permissionBlock(P(capture: .granted, microphone: .notDetermined, deviceHasInputs: false), requireGranted: true))
-        // inputs: "not determined" or unknown could raise a Microphone prompt
-        XCTAssertNotNil(EngineGate.permissionBlock(P(capture: .granted, microphone: .notDetermined, deviceHasInputs: true), requireGranted: true))
-        XCTAssertNotNil(EngineGate.permissionBlock(P(capture: .granted, microphone: .unknown, deviceHasInputs: true), requireGranted: true))
-        // decided either way: no prompt can appear
-        for m in [EngineGate.Microphone.authorized, .denied, .restricted] {
-            XCTAssertNil(EngineGate.permissionBlock(P(capture: .granted, microphone: m, deviceHasInputs: true), requireGranted: true), "\(m)")
+    func testMicrophoneStatusDoesNotGate() {
+        // The engine disables device input streams; no Microphone prompt was observed with "not determined".
+        for m in [EngineGate.Microphone.authorized, .denied, .restricted, .notDetermined, .unknown] {
+            for inputs in [true, false] {
+                XCTAssertNil(EngineGate.permissionBlock(P(capture: .granted, microphone: m, deviceHasInputs: inputs), requireGranted: true), "\(m)")
+            }
         }
     }
 
