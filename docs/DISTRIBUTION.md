@@ -2,8 +2,10 @@
 
 Written 2026-11-11. Facts were checked against the web on that date; each claim carries a source number
 `[n]` (list at the end). Anything marked **UNVERIFIED** could not be confirmed and must be tested or checked
-by you before you rely on it. Companion files in `dist/`: `make-dmg.sh` (tested), `release.yml` (draft CI
-workflow, not yet in `.github/`), `eq-ape.rb` (draft Homebrew cask).
+by you before you rely on it. Companion files: `dist/release.sh` (local release build, run), `dist/make-dmg.sh`
+(tested), `dist/update-cask.sh` and `dist/eq-ape.rb` (cask template), `.github/workflows/release.yml` and `ci.yml`
+(written, **never run**). Sections 1 to 13 are the original planning text (2026-11-11); sections 0a and 0b below
+were added when the first release was prepared (2026-11-12) and take precedence where they differ.
 
 ## 0. Decisions (fixed)
 
@@ -14,6 +16,73 @@ workflow, not yet in `.github/`), `eq-ape.rb` (draft Homebrew cask).
 - **No GPL code may be copied in.** Equalizer APO (GPL-2.0-or-later), BlackHole and CamillaDSP are behavioural references only; see `docs/APO-PARITY.md` for what was consulted.
 
 The sections below are background and procedure for carrying these decisions out.
+
+## 0a. What is real and what is still planned (2026-11-12)
+
+Real (exists in the repository, and was run where stated):
+- `dist/release.sh <version>`: tests, bundle, version stamp, ad-hoc signature, DMG, checksum, filled-in release notes. **Run** for `0.1.0-beta.1`.
+- `dist/make-dmg.sh`: run through `release.sh`. Its Developer ID and notarization branches have **never been executed**.
+- `docs/releases/v0.1.0-beta.1.md` (release notes with `{{VERSION}}` / `{{SHA256}}` placeholders that `release.sh` fills in, written to `dist/out/RELEASE-NOTES.md`) and `CHANGELOG.md`.
+- `.github/workflows/ci.yml` and `release.yml`: YAML parses (Ruby loader), reviewed by hand, **never run**; actionlint was not available. The runner label, Xcode version and action versions were checked against GitHub's published runner-images listing on 2026-11-12.
+- `dist/eq-ape.rb` and `dist/update-cask.sh`: `ruby -c` passes and `brew style` flags nothing but a frozen-string comment that casks do not need; the cask was **never** audited or installed.
+- `SECURITY.md`, `CONTRIBUTING.md`, issue template. Private vulnerability reporting is **disabled** on the repository as of 2026-11-12 (read-only API query); the owner must enable it (runbook step 2).
+- Name conflict search: done, see `docs/DISTRIBUTION.md` section 10.
+
+Still planned or open:
+- Developer ID, notarization, Sparkle or any updater (section 3, 7).
+- The `Mukimies/homebrew-tap` repository (does not exist; not created).
+- The TCC-survival test, the listening test and the self-signed-certificate test (section 12 items 3 and 4).
+- A first real run of both workflows, and a download-and-open test of the released DMG on a second Mac.
+
+**What varies between builds.** Same commit, same machine, two clean builds (`CLEAN=1`): Info.plist, icon and
+`CodeResources` were byte-identical; the unsigned Mach-O differed in 36 bytes (the LC_UUID and about 19 scattered
+bytes in the data/linkedit area, cause not investigated), so the ad-hoc signature (CDHash) differed; the DMG
+differs on every build (hdiutil embeds its own timestamps and UUIDs; file times inside the stage are normalised to
+the commit time). So **the SHA-256 is not reproducible**: a DMG built by CI and one built locally from the same commit
+will have different checksums; publish exactly one and never mix. The build number (`CFBundleVersion`) is the commit
+count of HEAD, so it changes with every commit; build the release from the final tagged commit. Inputs that make a
+build differ across machines: Xcode/Swift version, macOS SDK. The `swift test` step is not part of the artifact.
+
+## 0b. Cutting the release (v0.1.0-beta.1), in order
+
+Prerequisites: the `release-prep` branch exists locally in the worktree and nothing has been pushed.
+
+1. **Settle the content.** Merge the GUI work if it should be in the build. Resolve the `TODO` line in
+   `docs/releases/v0.1.0-beta.1.md` (does this build contain the configuration editor / reworked GUI) and delete it;
+   check the "not checked" list against reality; set the date in `CHANGELOG.md` (`## [0.1.0-beta.1] - YYYY-MM-DD`).
+   Commit.
+2. **Repository settings** (GitHub web UI, `Mukimies/eq-ape`): Settings > Code security > enable *Private vulnerability
+   reporting* (SECURITY.md relies on it). Optionally protect `main` and check Actions are enabled.
+3. **Merge and push.** Merge `release-prep` into `main` (a fast-forward or a PR), then `git push origin main`.
+   This runs `ci.yml` for the first time; wait for it to go green and fix workflow problems before tagging.
+4. **Dry run (recommended).** Actions > *release* > *Run workflow* on `main` with `dry_run` ticked and version
+   `0.1.0-beta.1`. Download the workflow artifact and check it as in the verification list below. No release is created.
+5. **Tag the final commit.** On `main`, with a clean tree: `git tag -a v0.1.0-beta.1 -m "EQ Ape 0.1.0-beta.1"` then
+   `git push origin v0.1.0-beta.1`. This starts the `release` workflow.
+6. **Wait for the workflow.** The `build` job runs the tests, builds, makes the DMG, and uploads it as an artifact;
+   the `release` job then creates a **draft pre-release**. Read the job log, the Gatekeeper step (unsigned mode
+   expects "rejected") and the job summary, which prints the updated Homebrew cask.
+7. **Review the draft** (Releases page): it is marked *pre-release*; assets are `EQ-Ape-0.1.0-beta.1.dmg` and
+   `EQ-Ape-0.1.0-beta.1.dmg.sha256`; the body has the checksum filled in and no `TODO` or `{{` left. Do **not** tick
+   *Set as the latest release*. Download the DMG with a browser on a second Mac, run `shasum -a 256 -c` on it, and follow
+   the install steps literally (Open Anyway, permission prompt: be at the machine and answer it).
+8. **Publish** the draft in the GitHub UI. A tag-triggered failure after step 5 is fixed by deleting the tag locally and
+   on the remote **before publishing anything**, fixing, and tagging again; never replace assets of a published release.
+9. **Homebrew tap (optional).** Create `Mukimies/homebrew-tap`, add `Casks/eq-ape.rb` from
+   `dist/update-cask.sh 0.1.0-beta.1 <sha256 or .sha256 file> > Casks/eq-ape.rb`, commit, push; test on a clean
+   machine (see section 8 for what to expect).
+10. **After publishing:** set the `CHANGELOG.md` link targets if needed, announce, collect feedback.
+
+**Manual fallback** (workflow broken or not trusted): on a clean checkout of the tagged commit on an Apple Silicon Mac,
+`dist/release.sh 0.1.0-beta.1`, then verify, then (tag pushed first)
+`gh release create v0.1.0-beta.1 dist/out/EQ-Ape-0.1.0-beta.1.dmg dist/out/EQ-Ape-0.1.0-beta.1.dmg.sha256 --verify-tag --draft --prerelease --title "EQ Ape 0.1.0-beta.1" --notes-file dist/out/RELEASE-NOTES.md`,
+then review and publish the draft as in steps 7 and 8.
+
+**Verification list for any DMG** (never launch the app on a machine whose audio you need until you are ready to answer
+the permission prompt): `hdiutil verify <dmg>`; `hdiutil attach -readonly -nobrowse <dmg>` shows `EQ Ape.app` and an
+`Applications` symlink; `codesign --verify --deep --strict -vv` on the app; `plutil -p Contents/Info.plist`
+(`CFBundleShortVersionString` 0.1.0, `EQApeReleaseVersion` 0.1.0-beta.1); `lipo -archs` prints `arm64`;
+`spctl -a -vv` on an unsigned build says `rejected`; `hdiutil detach`.
 
 ## 1. Recommendation
 
@@ -152,11 +221,18 @@ only if you adopt Sparkle. Releases are created from tags; never commit binaries
 
 **Releases.** Tag `vX.Y.Z`, mark betas as pre-release, attach the DMG and the `.sha256`, state "notarized: yes/no" in the notes.
 
-**Workflow** (`dist/release.yml`): on tag `v*` it runs the EQCore tests, builds the bundle, then branches on whether the
-signing secrets exist. Signed: import the .p12 into a temporary keychain, store notarytool credentials from an API
-key, run `make-dmg.sh` with `DEVELOPER_ID` and `NOTARY_PROFILE`, delete the keychain. Unsigned: run `make-dmg.sh`
-with nothing set. Both upload the artifacts and create the GitHub Release (`gh release create`). The runner label
-`macos-26` (arm64) exists [15]; macOS 14 images were retired on 2026-11-02 [15]. The workflow calls `App/bundle.sh`; check its arguments and output path against `docs/APP-NOTES.md` before the first run.
+**Workflow** (`.github/workflows/release.yml`, never run): on tag `v*` (or `workflow_dispatch`) the `build` job (runner
+`macos-26`, arm64, `DEVELOPER_DIR` pinned to Xcode 26.6) runs `dist/release.sh`, which runs both test suites, builds and stamps the
+bundle and makes the DMG; it branches on whether the signing secrets exist. Signed: import the .p12 into a temporary
+keychain, store notarytool credentials from an API key, run with `DEVELOPER_ID` and `NOTARY_PROFILE`, delete the
+keychain. Unsigned: nothing set. The DMG, checksum and release notes go up as a workflow artifact. The separate `release`
+job (ubuntu, the only job with `contents: write`) runs only for tags and never for a dry run, and creates a **draft**
+release (pre-release when the version has a `-` suffix) with `gh release create --draft`; a human publishes it. Facts
+checked on 2026-11-12: `macos-26` is arm64 and `macos-latest` points to it; the image (20261102.0473.1) has Xcode 26.6
+(17F113) as default, the same build as the local one (Swift 6.3.3 here); macOS 14 images were retired on 2026-11-02 [15];
+current majors `actions/checkout` v7, `upload-artifact` v7, `download-artifact` v8 (latest GitHub release tags);
+creating a release needs `contents: write` (the REST docs say only that push access is required; `contents: write` is the
+token permission that grants it, not stated verbatim on the page I read). Package tools versions: App 6.0, EQCore 5.9.
 
 **Secrets to create** (Settings > Secrets and variables > Actions):
 
@@ -203,14 +279,35 @@ older than 30 days, and the star threshold, then submit with `brew bump-cask-pr`
 
 **Does the licence affect eligibility?** Homebrew's published Acceptable Casks page and Package Acceptance Policy (both read on 2026-11-11) state no licence requirement for casks: they do not mention open source, proprietary or source-available licences. Casks are described as distributing "applications and other pre-built files published by the upstream developer". Homebrew can reject a package for "material legal ... risk" in its own words, and I found nothing about how maintainers treat the Commons Clause in practice, so whether a Commons Clause app is accepted is **UNVERIFIED**. Ask in the PR or an issue before investing in the submission. The personal tap below is not affected.
 
-**Personal tap: yes, now.** Create a repo named `homebrew-tap` under the `Mukimies` GitHub account with `Casks/eq-ape.rb` (draft:
-`dist/eq-ape.rb`, syntax-checked with `ruby -c`, never run through `brew audit`). Users: `brew install --cask Mukimies/tap/eq-ape`.
-Update `version` and `sha256` per release (a small step in the release workflow could do this later). Unsigned apps
-still arrive quarantined: Homebrew deprecated the `--no-quarantine` flag [16], so brew users will hit the same Open
-Anyway step, which is why the draft has a commented `caveats` block. Whether `brew` applies its Gatekeeper check to
-casks in third-party taps was **not verified**; other people maintain unsigned-cask taps [21], suggesting it is
-allowed. Do not add a `postflight` that strips quarantine: it works against Homebrew's stated policy [16][17] and is a
-bad look for a security-sensitive app.
+**Personal tap: yes, once the release is published.** The tap repository must be named `homebrew-<name>`: create
+`Mukimies/homebrew-tap` (short name `Mukimies/tap`) with `Casks/eq-ape.rb` (template: `dist/eq-ape.rb`). Per release,
+`dist/update-cask.sh <version> <sha256 | dmg | .sha256 file>` prints the cask with `version` and `sha256` replaced
+(the release workflow prints it in its job summary; nothing pushes it automatically). Install:
+`brew install --cask Mukimies/tap/eq-ape` (or `brew tap Mukimies/tap` first).
+
+What the user will experience (sources: Homebrew 5.0.0 announcement [16], the TomatoBar issue thread [25], and the
+source of Homebrew 7.0.13 read on the author's machine, 2026-11-12; the cask itself was **never installed or audited**,
+and the whole sequence below is **unverified end to end**):
+1. *Trust.* Homebrew 7.x requires non-official taps to be trusted before it loads their casks (`brew trust`; the
+   `HOMEBREW_REQUIRE_TAP_TRUST` behaviour is the default). Reading the source: `brew install --cask Mukimies/tap/eq-ape`
+   (fully qualified name typed on the command line) is explicitly allowed for `install`, `reinstall` and `upgrade`, but after a
+   plain `brew tap` the short `brew install --cask eq-ape` or a bare `brew upgrade` would be refused with "Refusing to
+   load cask ... from untrusted tap ... Run `brew trust ...`". Older Homebrew versions have no such step. The README should
+   give the fully qualified command and mention `brew trust Mukimies/tap`.
+2. *Quarantine.* Homebrew still sets the quarantine attribute on the downloaded DMG and propagates it to the app
+   (source of `cask/quarantine.rb`, agent name "Homebrew Cask"). The `--no-quarantine` flag is deprecated and gone [16][25].
+   So the installed app is quarantined, macOS refuses the first launch, and the user does the same Open Anyway step as
+   with a browser download (or `xattr -dr com.apple.quarantine "/Applications/EQ Ape.app"`). The cask's `caveats` block
+   prints these instructions after install.
+3. *Gatekeeper deprecation.* The "has been deprecated because it does not pass the macOS Gatekeeper check" warning and
+   disabling seen in the reports are for casks in the official homebrew-cask repository ("We will disable all
+   Homebrew/homebrew-cask casks that fail Gatekeeper checks in September 2026" [16]); it comes from a `deprecate!`/`disable!` stanza in
+   the cask, which our cask does not have. I found nothing saying a third-party tap's cask is blocked for being unsigned.
+4. *Upgrades.* Homebrew's source carries a user's Gatekeeper approval across an upgrade only when the signing identity
+   is unchanged (`cask/upgrade.rb`); an ad-hoc signature changes with every build, so expect the Open Anyway step and a new
+   audio-capture permission after each upgrade (the second is TCC behaviour, see section 2, **unverified**).
+Do not add a `postflight` that strips quarantine: it works against Homebrew's stated policy [16][17] and is a bad look for
+a security-sensitive app.
 
 ## 9. Licensing
 
@@ -230,7 +327,16 @@ has an MIT-style licence: UNVERIFIED here) must be compatible with the terms and
 
 ## 10. Naming, trademark, privacy, README
 
-**Naming hygiene.** "EQ Ape" is the decided name. **Conflicts with existing products, trademarks or repositories were not searched; do that before the first release** (GitHub, web, trademark registers). Do not use
+**Naming hygiene.** "EQ Ape" is the decided name. **Conflict search (2026-11-12, quick, not legal advice, no
+trademark-register search was possible):** web search for "EQ Ape", "EQApe", "eq-ape": no product or project of that name
+found. GitHub repository and code search: only `Mukimies/eq-ape` itself. Homebrew cask list (7824 casks): no `eq-ape`; the
+`ape` token is "ApE (A Plasmid Editor)", unrelated; `eqmac` exists (different name). Apple's public iTunes search API for
+"EQ Ape", "EQApe", "eq-ape" (macOS and all software): no app of that name; neighbours are generic equalizer apps
+("Equalizer - Music Player with 10-band EQ", "Sound Contour: Equalizer", etc.). Trademark aggregators showed no "EQ APE"
+or "EQAPE" mark; nearest: "EQ.APP" (serial 98386815, Class 42, a different mark), several unrelated "EQ" marks, and a dead
+"APE" application (serial 98547228, Classes 9 and 42, by another company). Note that ".ape" is the Monkey's Audio file
+extension, so "APE" evokes that audio format (association only). The USPTO/EUIPO/WIPO registers were not queried
+directly; do that before investing in branding. Do not use
 "Equalizer APO", "APO", or "eqMac" in the product name, bundle id, domain or icon, and do not reuse their logos
 (a standing project rule). Describe compatibility factually, once, in the README: *"Reads Equalizer APO-style
 configuration files (Preamp, Filter, GraphicEQ, Channel, Include). Not affiliated with, endorsed by or sponsored by
@@ -267,6 +373,8 @@ contained `EQ Ape.app` and `Applications -> /Applications`, detached cleanly, `s
 real credentials. Scratch files and the test DMG were deleted.
 
 ## 12. Launch checklist (in order)
+
+(Status 2026-11-12: item 1 done except the official trademark registers; items 6 and 7 are written but not pushed or run; the runbook is in section 0b.)
 
 1. Search for conflicts with the name "EQ Ape" (GitHub, web, trademark registers); replace the placeholder bundle id `org.eqape.EQApe` if needed, and check the `NSAudioCaptureUsageDescription` wording and paths in `release.yml`/`eq-ape.rb`.
 2. Confirm no Equalizer APO code was copied (`docs/APO-PARITY.md`); `LICENSE` is already in place.
@@ -317,3 +425,5 @@ Decided: name, licence, Apple Silicon only, GitHub Releases DMG (section 0).
 22. https://sourceforge.net/projects/equalizerapo/ (fetched: GPLv2)
 23. https://sourceforge.net/p/equalizerapo/code/ci/bbfcc3e5024cbb9d61ba75fc88d78605cc4c9687/tree/License.txt (fetched: GPL v2 text)
 24. https://sourceforge.net/p/equalizerapo/ (author attribution from a search summary; secondary)
+25. https://github.com/ivoronin/TomatoBar/issues/102 (fetched 2026-11-12: Gatekeeper deprecation warning, `--no-quarantine` gone, `xattr` workaround)
+26. https://github.com/actions/runner-images and its macos-26-arm64-Readme.md (fetched 2026-11-12: labels, Xcode 26.6 default, image 20261102.0473.1)

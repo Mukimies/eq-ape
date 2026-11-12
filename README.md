@@ -52,9 +52,11 @@ EQ Ape is not affiliated with, endorsed by or sponsored by the Equalizer APO pro
 
 ## Installing
 
-Download the DMG from the GitHub Releases page of this repository once a release is available, open it and drag EQ Ape to Applications. Verify the download with the `.sha256` file: `shasum -a 256 -c EQ-Ape-<version>.dmg.sha256`.
+Download the DMG from the [GitHub Releases](https://github.com/Mukimies/eq-ape/releases) page of this repository once a release is available (the first one will be the pre-release `v0.1.0-beta.1`), open it and drag EQ Ape to Applications. Verify the download with the `.sha256` file: `shasum -a 256 -c EQ-Ape-<version>.dmg.sha256`.
 
-The first release is expected to be **not notarized** (subject to change). On current macOS (15 and later), Control-click > Open no longer bypasses Gatekeeper. Instead:
+A Homebrew tap (`brew install --cask Mukimies/tap/eq-ape`) is planned and does not exist yet. Even then the app arrives quarantined and the steps below still apply; see `docs/DISTRIBUTION.md`, section 8.
+
+The first release is **not notarized** (there is no Apple Developer ID yet; it is ad-hoc signed). On current macOS (15 and later), Control-click > Open no longer bypasses Gatekeeper. Instead:
 
 1. Double-click EQ Ape. macOS shows an alert that it cannot verify the app. Close it (do not move the app to the Trash).
 2. Open System Settings > Privacy & Security, scroll to the Security section and click **Open Anyway** next to the EQ Ape message, then confirm.
