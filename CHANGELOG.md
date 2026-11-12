@@ -4,9 +4,9 @@ All notable changes to EQ Ape are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-## [0.1.0-beta.1] - UNRELEASED
+## [0.1.0-beta.1] - 2026-11-12
 
-First public pre-release (ad-hoc signed, not notarized, Apple Silicon only, macOS 14.2+). The date is to be filled in when it is published.
+First public pre-release (ad-hoc signed, not notarized, Apple Silicon only, macOS 14.2+).
 
 ### Added
 - Menu bar app that equalizes all system audio on the output device through a Core Audio process tap and a private aggregate device, without a virtual driver.
