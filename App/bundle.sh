@@ -12,6 +12,19 @@ APP="build/EQ Ape.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+
+# Optional version stamping (used by dist/release.sh). Without these variables the checked-in
+# Info.plist values are kept.
+#   EQAPE_VERSION        numeric CFBundleShortVersionString, e.g. 0.1.0
+#   EQAPE_BUILD          integer CFBundleVersion
+#   EQAPE_RELEASE_LABEL  full release label (custom key EQApeReleaseVersion), e.g. 0.1.0-beta.1
+PB=/usr/libexec/PlistBuddy
+PLIST="$APP/Contents/Info.plist"
+[ -z "${EQAPE_VERSION:-}" ] || "$PB" -c "Set :CFBundleShortVersionString $EQAPE_VERSION" "$PLIST"
+[ -z "${EQAPE_BUILD:-}" ] || "$PB" -c "Set :CFBundleVersion $EQAPE_BUILD" "$PLIST"
+if [ -n "${EQAPE_RELEASE_LABEL:-}" ]; then
+  "$PB" -c "Add :EQApeReleaseVersion string $EQAPE_RELEASE_LABEL" "$PLIST"
+fi
 cp "$BIN" "$APP/Contents/MacOS/EQApe"
 
 # Icon (generated; skipped if it fails for any reason)

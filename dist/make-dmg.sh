@@ -68,6 +68,12 @@ fi
 
 ln -s /Applications "$STAGE/Applications"
 
+# Reproducibility: normalise file times to SOURCE_DATE_EPOCH when it is set (dist/release.sh sets it).
+if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
+  STAMP="$(date -u -r "$SOURCE_DATE_EPOCH" +%Y%m%d%H%M.%S)"
+  find "$STAGE" -exec touch -h -t "$STAMP" {} +
+fi
+
 echo "==> creating $DMG"
 # UDZO = zlib-compressed read-only image; HFS+ is the most compatible filesystem for a DMG.
 hdiutil create -quiet -volname "$VOLNAME" -srcfolder "$STAGE" -fs HFS+ \
