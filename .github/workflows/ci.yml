@@ -1,0 +1,44 @@
+# CI for EQ Ape. NOTE: this workflow has never run (written 2026-11-12, not yet pushed to GitHub).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    # macos-26 = arm64 (EQ Ape ships arm64 only). Its image carries Xcode 26.6 as default (checked 2026-11-12).
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+
+      # Tests that need a real config file skip themselves because EQAPE_REAL_CONFIG is unset (expected).
+      - name: Test EQCore
+        run: swift test --package-path EQCore
+
+      - name: Test App
+        run: swift test --package-path App
+
+      # Builds the release bundle (arm64, ad-hoc signed). Does not launch the app.
+      - name: Build app bundle
+        run: |
+          ./App/bundle.sh
+          test -d "App/build/EQ Ape.app"
+          lipo -archs "App/build/EQ Ape.app/Contents/MacOS/EQApe"

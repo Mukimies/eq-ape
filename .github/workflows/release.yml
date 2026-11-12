@@ -1,0 +1,201 @@
+# Release workflow for EQ Ape (Apple Silicon / arm64 only, https://github.com/Mukimies/eq-ape).
+#
+# NOTE: THIS WORKFLOW HAS NEVER RUN. It was written 2026-11-12 and validated only by parsing the YAML and
+# by hand review (actionlint was not available). Expect to fix small things on the first run; do a
+# workflow_dispatch dry run first.
+#
+# Triggers:
+#   - push of a tag v*  (e.g. v0.1.0-beta.1): builds, then creates a DRAFT GitHub Release (a pre-release
+#     if the version has a "-" suffix) with the DMG, the .sha256 and docs/releases/<tag>.md as the body.
+#     A human reviews and publishes the draft.
+#   - workflow_dispatch: builds and uploads the DMG as a workflow artifact. With dry_run=true (default)
+#     no release is ever created. With dry_run=false AND a tag selected as the ref, it behaves like a tag push.
+#
+# Two modes, chosen automatically by the presence of secrets (a fork or a fresh repo has none):
+#   - unsigned: ad-hoc signed app, plain DMG (the first release, v0.1.0-beta.1)
+#   - signed:   Developer ID signing + notarization + stapling (needs the secrets listed below)
+#
+# Optional secrets (Settings > Secrets and variables > Actions); see docs/DISTRIBUTION.md section 6:
+#   MACOS_CERT_P12_BASE64      Developer ID Application certificate + key as .p12, base64
+#   MACOS_CERT_PASSWORD        password of that .p12
+#   DEVELOPER_ID               identity name, e.g. "Developer ID Application: Name (TEAMID)"
+#   NOTARY_API_KEY_P8_BASE64   App Store Connect API key (.p8), base64
+#   NOTARY_API_KEY_ID          key ID
+#   NOTARY_API_ISSUER_ID       issuer UUID
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: build and upload the DMG as a workflow artifact, create no release'
+        type: boolean
+        default: true
+      version:
+        description: 'Version for a manual run without a tag, e.g. 0.1.0-beta.1 (ignored when run on a tag)'
+        type: string
+        default: '0.0.0-dev'
+
+# Least privilege by default; only the release job gets contents: write.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # macos-26 is arm64. macos-latest currently points to it as well, but pinning avoids surprises.
+    # Image 20261102.0473.1 (checked 2026-11-12): macOS 26.7.2, Xcode 26.6 (17F113, default), same build as the
+    # one used locally for 0.1.0-beta.1 (Swift 6.3.3). The packages need swift-tools 6.0 (App) and 5.9 (EQCore).
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      signed: ${{ steps.mode.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # dist/release.sh derives the build number from the commit count
+
+      - name: Work out version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="${INPUT_VERSION:-0.0.0-dev}"
+          fi
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "bad version: $V"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Decide signed or unsigned
+        id: mode
+        env:
+          HAVE_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.DEVELOPER_ID != '' && secrets.NOTARY_API_KEY_P8_BASE64 != '' && secrets.NOTARY_API_KEY_ID != '' && secrets.NOTARY_API_ISSUER_ID != '' }}
+        run: echo "signed=$HAVE_CERT" >> "$GITHUB_OUTPUT"
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+
+      # ---- signed mode only ----
+      - name: Import signing certificate into a temporary keychain
+        if: steps.mode.outputs.signed == 'true'
+        env:
+          P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/build.keychain-db"
+          KCPASS="$(uuidgen)"
+          security create-keychain -p "$KCPASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPASS" "$KC"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KCPASS" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Store notarytool credentials
+        if: steps.mode.outputs.signed == 'true'
+        env:
+          KEY_P8: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          ISSUER: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          echo "$KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool store-credentials ci-notary \
+            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$KEY_ID" --issuer "$ISSUER"
+
+      # Runs the tests, builds and stamps the bundle, ad-hoc signs, and makes the DMG (dist/release.sh).
+      # In signed mode DEVELOPER_ID / NOTARY_PROFILE make dist/make-dmg.sh re-sign with the hardened runtime,
+      # notarize and staple.
+      - name: Build release (tests, bundle, DMG)
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SIGNED: ${{ steps.mode.outputs.signed }}
+          SECRET_DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+        run: |
+          if [ "$SIGNED" = "true" ]; then
+            export DEVELOPER_ID="$SECRET_DEVELOPER_ID"
+            export NOTARY_PROFILE=ci-notary
+            export ENTITLEMENTS="$PWD/App/Resources/EQApe.entitlements"
+          fi
+          dist/release.sh "$VERSION"
+
+      - name: Gatekeeper and signature check (informational)
+        run: |
+          # In unsigned mode "rejected" is EXPECTED.
+          spctl -a -vv --type exec "App/build/EQ Ape.app" || true
+          codesign -dvv "App/build/EQ Ape.app" || true
+          lipo -archs "App/build/EQ Ape.app/Contents/MacOS/EQApe"
+          hdiutil verify dist/out/*.dmg
+
+      - name: Clean up keychain and API key
+        if: always() && steps.mode.outputs.signed == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: EQ-Ape-${{ steps.ver.outputs.version }}
+          path: dist/out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    # Only for tag builds, and never for a dry run.
+    if: startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # create the GitHub Release (and nothing else)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+      SIGNED: ${{ needs.build.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v7   # for dist/update-cask.sh and the cask template
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: EQ-Ape-${{ needs.build.outputs.version }}
+          path: out
+
+      - name: Print the updated Homebrew cask (not published anywhere)
+        run: |
+          {
+            echo '### Updated cask for the personal tap (copy to Casks/eq-ape.rb in Mukimies/homebrew-tap)'
+            echo '```ruby'
+            dist/update-cask.sh "$VERSION" "out/EQ-Ape-$VERSION.dmg.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create DRAFT GitHub Release
+        run: |
+          PRE=()
+          [[ "$VERSION" == *-* ]] && PRE=(--prerelease)
+          if [ -f out/RELEASE-NOTES.md ]; then
+            NOTES=(--notes-file out/RELEASE-NOTES.md)
+          else
+            NOTES=(--generate-notes)
+          fi
+          if [ "$SIGNED" = "true" ]; then
+            echo "note: signed + notarized build; the notes file still says 'not notarized' unless you edit it" >&2
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "out/EQ-Ape-$VERSION.dmg" "out/EQ-Ape-$VERSION.dmg.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft ${PRE[@]+"${PRE[@]}"} \
+            --title "EQ Ape $VERSION" "${NOTES[@]}"
