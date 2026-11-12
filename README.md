@@ -7,10 +7,9 @@ EQ Ape is a menu bar equalizer for macOS that processes all system audio going t
 Early beta, built in one evening. What has and has not been checked:
 
 - **Measured and tested:** the tap engine (tap, aggregate device, in-place processing, replay to the same device) was measured on a Scarlett Solo USB and on MacBook Pro Speakers: real audio, processing applied, no overloads or timestamp discontinuities, about 23-24 ms added delay. The DSP and config parser are covered by automated tests (`EQCore`, including a parity audit against Equalizer APO's documented behaviour).
-- **Needs listening confirmation on each setup:** that the original, unprocessed sound is actually muted. There is no measurable proxy for this, so it has only been designed for (a muted-while-tapped tap), not confirmed by ear on every device.
+- **Confirmed by ear on one setup:** on a Scarlett Solo USB the first menu-bar build engaged after the permission prompt, sounded correct, and the original, unprocessed sound was muted (no doubling). There is no measurable proxy for muting, so every other device type still needs the same listening check.
 - **Tested headless only:** the app logic (per-device profiles, following the default output, live config reload, sample-rate change, a 5-minute soak, recovery after `kill -9`) was exercised through the app's headless mode. See `docs/APP-NOTES.md` for the numbers.
 - **GUI:** the configuration editor and settings window were rendered offscreen and inspected, and the real GUI was launched with `--no-engine` (no audio engine) and driven in-process by a scripted smoke test (graph drag, live save, undo). It has not yet been used by a person with the engine running. See `docs/EDITOR-NOTES.md`.
-- **Not tested at all:** the app's own permission prompt has never been seen.
 - **Unverified:** Bluetooth, AirPlay and HDMI outputs; unplug/replug and sleep/wake; runs longer than five minutes; whether the audio-capture permission survives updates of an unsigned build.
 
 See `docs/APP-NOTES.md` for app-level status. See `docs/TAP-FINDINGS.md` for the full list of what was and was not verified for the tap engine.
