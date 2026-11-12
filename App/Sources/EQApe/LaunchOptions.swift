@@ -22,6 +22,8 @@ struct LaunchOptions {
     var noEngine = false
     var requireGranted = false
     var printPermission = false
+    /// --login-item status|on|off: read or change the "launch at login" item of this bundle, print it and exit.
+    var loginItem: String?
     var editorPath: String?
     var settingsPath: String?
     var backupDir: String?
@@ -42,6 +44,7 @@ struct LaunchOptions {
             case "--no-engine": o.noEngine = true
             case "--require-granted": o.requireGranted = true
             case "--print-permission": o.printPermission = true
+            case "--login-item": i += 1; o.loginItem = i < args.count ? args[i] : "status"
             case "--editor": o.editorPath = next().map { ($0 as NSString).expandingTildeInPath }
             case "--settings": o.settingsPath = next().map { ($0 as NSString).expandingTildeInPath }
             case "--backup-dir": o.backupDir = next().map { ($0 as NSString).expandingTildeInPath }

@@ -4,6 +4,13 @@ All notable changes to EQ Ape are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+- `--login-item status|on|off`: read or change the "launch at login" item from the command line.
+
+### Fixed
+- When the audio-capture prompt took longer than 5 seconds to answer, the engine stayed off until Reload. The app now watches the permission (read-only) and starts by itself once it is granted. Not yet exercised with a real pending prompt.
+- An engine left over from such a blocked start is now destroyed before a new one is built, so Reload cannot leave two engines processing the same device.
+
 ## [0.1.0-beta.2] - 2026-11-12
 
 Second pre-release (ad-hoc signed, not notarized, Apple Silicon only, macOS 14.2+).

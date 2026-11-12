@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
         // the audio twice), the permission gate with --require-granted (no prompt may appear in unattended runs).
         let requireGranted = options.requireGranted
         controller.useDeviceLock = true
+        controller.capturePermission = { PermissionCheck.capture() }
         controller.startGate = { dev, uid in
             let inputs = HAL.channels(dev, scope: kAudioObjectPropertyScopeInput) > 0
             let p = EngineGate.PermissionInputs(capture: PermissionCheck.capture(), microphone: PermissionCheck.microphone(),

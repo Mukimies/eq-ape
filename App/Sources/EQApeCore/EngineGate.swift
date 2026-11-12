@@ -40,6 +40,19 @@ public enum EngineGate {
         return nil
     }
 
+    public enum BlockedStartAction: Equatable, Sendable { case wait, retry, giveUp(String) }
+
+    /// What to do while an engine start is blocked (AudioDeviceStart did not return, normally because the
+    /// audio-capture prompt is still open). Retrying is only safe once the permission is granted, and only once.
+    public static func blockedStartAction(permission: Capture, autoRetried: Bool) -> BlockedStartAction {
+        switch permission {
+        case .notDetermined, .unknown: return .wait
+        case .denied: return .giveUp("audio capture was denied: allow EQ Ape under System Settings > Privacy & Security > Screen & System Audio Recording, then choose Reload")
+        case .granted:
+            return autoRetried ? .giveUp("audio start blocked although the permission is granted: choose Reload") : .retry
+        }
+    }
+
     /// Another EQ Ape process, as seen from this one.
     public struct Peer: Equatable, Sendable {
         public var pid: Int32

@@ -20,6 +20,14 @@ final class EngineGateTests: XCTestCase {
         }
     }
 
+    func testBlockedStartRetriesOnlyOnceAndOnlyWhenGranted() {
+        XCTAssertEqual(EngineGate.blockedStartAction(permission: .notDetermined, autoRetried: false), .wait)
+        XCTAssertEqual(EngineGate.blockedStartAction(permission: .unknown, autoRetried: false), .wait)
+        XCTAssertEqual(EngineGate.blockedStartAction(permission: .granted, autoRetried: false), .retry)
+        if case .giveUp = EngineGate.blockedStartAction(permission: .granted, autoRetried: true) {} else { XCTFail("second automatic retry") }
+        if case .giveUp = EngineGate.blockedStartAction(permission: .denied, autoRetried: false) {} else { XCTFail("denied must not retry") }
+    }
+
     func testMicrophoneStatusDoesNotGate() {
         // The engine disables device input streams; no Microphone prompt was observed with "not determined".
         for m in [EngineGate.Microphone.authorized, .denied, .restricted, .notDetermined, .unknown] {

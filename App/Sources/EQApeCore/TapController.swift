@@ -65,6 +65,11 @@ public final class TapController: @unchecked Sendable {
     /// reason to keep the engine off (`EngineState.held`); it is asked again every `heldRecheckInterval` seconds and
     /// on every reconcile. Used for `--require-granted` and the instance guard (`EngineGate`).
     public var startGate: ((AudioObjectID, String) -> String?)?
+    /// Read-only audio-capture permission probe (never prompts). Asked every `heldRecheckInterval` seconds while a
+    /// start is blocked, so the engine starts by itself once a slowly answered prompt has been allowed.
+    public var capturePermission: () -> EngineGate.Capture = {
+        EngineGate.Capture(rawValue: Permission.audioCapture().rawValue) ?? .unknown
+    }
     public var heldRecheckInterval: TimeInterval = 5
     /// Hold `InstanceRegistry`'s per-device lock while an engine exists (GUI), so a second instance cannot tap
     /// the same device.
@@ -82,6 +87,7 @@ public final class TapController: @unchecked Sendable {
     private var engineDevice: AudioObjectID = 0
     private var stuckEngines: [TapEngine] = []      // engines whose AudioDeviceStart never returned
     private var startBlocked = false
+    private var blockedAutoRetried = false          // one automatic retry per blocked episode
     private var loaded: LoadedConfig?
     private var loadedPath: String?
     private var processorSpec: (config: EQConfig?, headroom: Double?, sr: Double, ch: Int)?
@@ -265,7 +271,8 @@ public final class TapController: @unchecked Sendable {
     /// Manual reload: re-read the config, and clear a "start blocked" condition (user is present).
     public func reload() {
         queue.async { [self] in
-            startBlocked = false
+            startBlocked = false; blockedAutoRetried = false
+            if capturePermission() != .notDetermined { releaseStuckEngines() }
             event("manual reload")
             scheduleReconcile(force: true, reload: true, delay: 0)
         }
@@ -351,6 +358,7 @@ public final class TapController: @unchecked Sendable {
             teardown(reason: force ? "forced rebuild" : "device/format change")
             if startBlocked {
                 setStatus { $0.state = .error("audio start blocked: answer the audio-capture permission prompt, then choose Reload") }
+                scheduleBlockedRecheck()
                 return
             }
             if let reason = startGate?(dev, uid) { hold(reason); return }
@@ -392,7 +400,7 @@ public final class TapController: @unchecked Sendable {
         switch e.start(timeout: startTimeout) {
         case .started:
             engine = e; engineKey = key; engineDevice = dev
-            retryDelay = 1
+            retryDelay = 1; blockedAutoRetried = false
             lastCallbacks = stats.load(.callbacks); stalledTicks = 0
             setStatus { st in
                 st.state = .active; st.rebuilds += 1
@@ -409,8 +417,40 @@ public final class TapController: @unchecked Sendable {
             stuckEngines.append(e)
             startBlocked = true
             setStatus { $0.state = .error("audio start blocked (permission prompt pending?): answer it, then choose Reload") }
-            event("AudioDeviceStart did not return within \(startTimeout) s; not retrying")
+            event("AudioDeviceStart did not return within \(startTimeout) s; waiting for the permission prompt to be answered")
+            scheduleBlockedRecheck()
         }
+    }
+
+    /// While a start is blocked, poll the read-only permission probe. Once the permission is granted no prompt can
+    /// be pending, so one automatic retry is safe; anything else waits for a manual Reload.
+    private func scheduleBlockedRecheck() {
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, self.started, self.startBlocked else { return }
+            switch EngineGate.blockedStartAction(permission: self.capturePermission(), autoRetried: self.blockedAutoRetried) {
+            case .wait:
+                self.scheduleBlockedRecheck()
+            case .retry:
+                self.blockedAutoRetried = true
+                self.startBlocked = false
+                self.releaseStuckEngines()
+                self.event("audio-capture permission granted; starting the engine")
+                self.reconcile(force: true, reload: false)
+            case .giveUp(let why):
+                self.setStatus { $0.state = .error(why) }
+            }
+        }
+        retryWork = w
+        queue.asyncAfter(deadline: .now() + heldRecheckInterval, execute: w)
+    }
+
+    /// Destroy engines whose AudioDeviceStart never returned in time. Their start completes once the prompt is
+    /// answered, and a second engine on the same device would then process the audio twice.
+    private func releaseStuckEngines() {
+        guard !stuckEngines.isEmpty else { return }
+        event("releasing \(stuckEngines.count) engine(s) left from a blocked start")
+        for e in stuckEngines { e.stop() }
+        stuckEngines.removeAll()
     }
 
     /// Keep the engine off for a safety reason (no tap was created) and ask the gate again later.
