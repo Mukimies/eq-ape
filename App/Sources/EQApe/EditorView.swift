@@ -17,7 +17,8 @@ struct EditorView: View {
                     ResponseGraph(data: model.graphData,
                                   onSelect: { model.selection = $0; if let r = $0 { model.scrollTarget = r } },
                                   onDrag: { model.dragHandle($0, freq: $1, gain: $2, q: $3, phase: $4) },
-                                  onAddFilter: { model.addFilter(freq: $0, gain: $1) })
+                                  onAddFilter: { model.addFilter(freq: $0, gain: $1) },
+                                  onGEQ: { model.handleGEQ($0) })
                         .frame(minHeight: 200, idealHeight: 300)
                 }
                 .frame(minHeight: 230, idealHeight: 330)
@@ -65,8 +66,19 @@ struct EditorHeader: View {
                 Text(model.displayPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
-            Button { model.addFilter() } label: { Label("Add Filter", systemImage: "plus") }
-                .help("Add a peaking filter after the selected line")
+            Menu {
+                Button("Add Filter (peaking)") { model.addFilter() }
+                Divider()
+                Button("Add Graphic EQ (variable)") { model.addGraphicEQ(.variable) }
+                Button("Add Graphic EQ (15 bands)") { model.addGraphicEQ(.fixed15) }
+                Button("Add Graphic EQ (31 bands)") { model.addGraphicEQ(.fixed31) }
+            } label: {
+                Label("Add", systemImage: "plus")
+            } primaryAction: {
+                model.addFilter()
+            }
+            .fixedSize()
+            .help("Add a peaking filter after the selected line; the arrow offers graphic EQ lines (variable, 15 or 31 bands)")
             Divider().frame(height: 20)
             Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
                 .keyboardShortcut("z", modifiers: .command)
@@ -92,13 +104,17 @@ struct GraphOptionsBar: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Text("Drag a handle: ↔ frequency, ↕ gain, ⌥-drag or scroll: Q. Double-click to add a filter.")
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            if let sel = model.selection, let o = model.geqOverlay(sel) {
+                GEQNodeFields(model: model, overlay: o)
+            } else {
+                Text("Drag a handle: ↔ frequency, ↕ gain, ⌥-drag or scroll: Q. Double-click to add a filter.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            }
             Spacer(minLength: 8)
             Toggle("Preamp", isOn: $model.showPreamp).help("Include Preamp lines in the plotted curve")
             Toggle("Anti-clipping gain", isOn: $model.showAntiClip).help("Include the automatic anti-clipping gain the engine applies")
             Toggle("Selected line", isOn: $model.showSelected).help("Show the selected line's own curve")
-            Toggle("Peak", isOn: $model.showPeak).help("Mark the maximum that sets the anti-clipping gain")
+            Toggle("Peak", isOn: $model.showPeak).help("Mark the maximum of the whole chain (every filter, the graphic EQ as played), which sets the anti-clipping gain")
         }
         .toggleStyle(.checkbox)
         .controlSize(.small)
@@ -206,6 +222,8 @@ struct RowView: View {
                     Text("not found").font(.caption).foregroundStyle(.orange)
                 }
             }
+        case .comment(.graphicEQ(let pts)?):
+            GraphicEQRowView(model: model, ref: row.ref, points: pts, channels: row.channels, active: false)
         case .comment(let cmd):
             HStack(spacing: 8) {
                 Text(row.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
@@ -387,26 +405,95 @@ struct PreampRowView: View {
 }
 
 struct GraphicEQRowView: View {
-    let model: EditorModel
+    @ObservedObject var model: EditorModel
     let ref: LineRef
     let points: [GraphicEQPoint]
     let channels: String?
+    var active = true
 
     var body: some View {
-        let sorted = points.sorted { $0.freq < $1.freq }
-        let lo = sorted.map(\.gainDB).min() ?? 0, hi = sorted.map(\.gainDB).max() ?? 0
-        HStack(spacing: 8) {
-            Image(systemName: "slider.vertical.3").foregroundStyle(.secondary).frame(width: 44)
-            Text("GraphicEQ").font(.system(size: 12, weight: .semibold)).frame(width: 128, alignment: .leading)
-            MiniCurve(points: sorted).frame(width: 160, height: 22)
-            Text("\(points.count) bands, \(String(format: "%+.1f", lo)) to \(String(format: "%+.1f", hi)) dB")
-                .font(.callout).foregroundStyle(.secondary)
-            ChannelBadge(channels: channels)
-            Button("Edit Bands…") { model.selection = ref; model.editingGraphicEQ = ref }
+        let layout = model.geqLayout(ref)
+        let overlay = model.geqOverlay(ref)
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Toggle(isOn: Binding(get: { active }, set: { model.setCommented(ref, !$0) })) {
+                        Image(systemName: "power")
+                    }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help(active ? "On: click to comment the line out (#), as Equalizer APO does" : "Off (commented out): click to enable")
+                    .accessibilityLabel("Graphic EQ on")
+                    Text("Graphic EQ").font(.system(size: 12, weight: .semibold))
+                    ChannelBadge(channels: channels)
+                }
+                Picker("Bands", selection: Binding(get: { layout }, set: { model.setGEQLayout($0, for: ref) })) {
+                    ForEach(GraphicEQEditing.Layout.allCases, id: \.self) { l in Text(l.title.replacingOccurrences(of: " bands", with: "-band")).tag(l) }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
                 .controlSize(.small)
-            Spacer()
-            Button { model.delete(ref) } label: { Image(systemName: "trash") }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Delete graphic EQ")
+                .disabled(!active)
+                .help("15-band and 31-band lock the frequencies to the standard bands; Variable lets you move, add and remove nodes")
+                .accessibilityLabel("Band mode")
+                Text("\(points.count) nodes").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Button("Sliders…") { model.selection = ref; model.editingGraphicEQ = ref }
+                        .controlSize(.small)
+                        .help("Edit the bands with vertical sliders in a sheet")
+                    Button { model.delete(ref) } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Delete graphic EQ")
+                }
+            }
+            .frame(width: 118, alignment: .leading)
+            if let o = overlay {
+                GEQRowGraph(overlay: o, onGEQ: { model.handleGEQ($0) })
+                    .frame(height: 150)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(model.selection == ref ? GEQColor.color.opacity(0.7) : Color.secondary.opacity(0.3),
+                                                                     lineWidth: model.selection == ref ? 1.5 : 1))
+                    .opacity(active ? 1 : 0.6)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+enum GEQColor { static var color: Color { Color(nsColor: GEQNodeStyle.color) } }
+
+/// Read-out and numeric entry for the selected node of the selected GraphicEQ line (above the main graph).
+struct GEQNodeFields: View {
+    @ObservedObject var model: EditorModel
+    let overlay: GEQOverlay
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.fill").foregroundStyle(GEQColor.color).font(.system(size: 9)).accessibilityHidden(true)
+            if let i = overlay.selectedNode, overlay.points.indices.contains(i) {
+                let p = overlay.points[i]
+                Text("Node \(i + 1) of \(overlay.points.count)").font(.caption.weight(.semibold))
+                NumberField(value: p.freq, digits: 2, label: "Node frequency in Hz", width: 64) { model.setGEQNode(overlay.ref, i, freq: $0) }
+                    .disabled(overlay.locked || !overlay.editable)
+                Text("Hz").font(.caption).foregroundStyle(.secondary)
+                NumberField(value: p.gainDB, digits: 2, label: "Node gain in dB", width: 52) { model.setGEQNode(overlay.ref, i, gain: $0) }
+                    .disabled(!overlay.editable)
+                Text("dB").font(.caption).foregroundStyle(.secondary)
+                if !overlay.locked {
+                    Button { model.handleGEQ(.remove(overlay.ref, i)) } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                        .disabled(overlay.points.count <= GraphicEQEditing.minNodes || !overlay.editable)
+                        .help("Remove this node (also: double-click it, or Delete)")
+                        .accessibilityLabel("Remove node")
+                }
+                Text(overlay.locked ? "fixed bands: ↕ only" : "⇧ one axis · arrows nudge")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                Text(overlay.locked
+                     ? "Graphic EQ (fixed bands): drag a node ↕ for gain. Switch the row to Variable to move, add or remove nodes."
+                     : "Graphic EQ: drag a node ↔ frequency ↕ gain (⇧ one axis). Double-click to add a node, double-click a node or press Delete to remove it.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            }
         }
     }
 }
@@ -457,6 +544,7 @@ struct StatusStrip: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("Anti-clip").font(.system(size: 10)).foregroundStyle(.secondary)
+                    .help("Lowers the level by the largest boost of the whole EQ (every filter, high-pass included) plus the headroom, so a steady tone at full scale stays below 0 dBFS. It does not make clipping impossible: the EQ's phase shifts can raise short peaks of already loud music by a few dB. The clip light shows when that happens.")
                 Text(st.appliedGainDB.map { String(format: "%.2f dB", $0) } ?? (model.profileForThisFile?.headroomEnabled == false ? "off" : "–"))
                     .font(.system(size: 11).monospacedDigit())
             }
@@ -525,30 +613,17 @@ struct GraphicEQEditor: View {
     @State private var selected: Int?
     @Environment(\.dismiss) private var dismiss
 
-    static let layouts: [(String, [Double])] = [
-        ("10 bands (octaves)", [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]),
-        ("15 bands (2/3 octave)", [25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000]),
-        ("31 bands (1/3 octave)", [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250,
-                                   1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000]),
-    ]
-
-    var points: [GraphicEQPoint] {
-        if case .graphicEQ(let p)? = model.line(ref)?.anyCommand { return p.sorted { $0.freq < $1.freq } }
-        return []
-    }
+    var points: [GraphicEQPoint] { model.geqPoints(ref) ?? [] }
 
     func write(_ pts: [GraphicEQPoint], coalesce: Bool = false) {
-        model.set(.graphicEQ(points: pts), at: ref, name: "Edit Graphic EQ", coalesce: coalesce ? "geq-\(ref.url.path)-\(ref.line)" : nil)
-    }
-
-    func resample(to freqs: [Double]) {
-        let old = points
-        write(freqs.map { GraphicEQPoint(freq: $0, gainDB: (GraphicEQDesigner.interpolateDB(old, $0) * 10).rounded() / 10) })
-        selected = nil
+        model.set(.graphicEQ(points: GraphicEQEditing.sorted(pts)), at: ref, name: "Edit Graphic EQ",
+                  coalesce: coalesce ? "geq-\(ref.url.path)-\(ref.line)" : nil)
     }
 
     var body: some View {
         let pts = points
+        let layout = model.geqLayout(ref)
+        let variable = layout == .variable
         let maxAbs = pts.map { abs($0.gainDB) }.max() ?? 0
         let r = max(12, (ceil((maxAbs + 1) / 3)) * 3)
         VStack(alignment: .leading, spacing: 10) {
@@ -559,17 +634,20 @@ struct GraphicEQEditor: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Menu("Band Layout") {
-                    ForEach(GraphicEQEditor.layouts, id: \.0) { l in
-                        Button(l.0) { resample(to: l.1) }
-                    }
-                    Divider()
-                    Button("Flatten (all 0 dB)") { write(pts.map { GraphicEQPoint(freq: $0.freq, gainDB: 0) }) }
+                Picker("Mode", selection: Binding(get: { layout }, set: { if model.setGEQLayout($0, for: ref) { selected = nil } })) {
+                    Text("Fixed: 15 bands").tag(GraphicEQEditing.Layout.fixed15)
+                    Text("Fixed: 31 bands").tag(GraphicEQEditing.Layout.fixed31)
+                    Text("Variable").tag(GraphicEQEditing.Layout.variable)
                 }
-                .frame(width: 130)
-                .help("Change the band frequencies; the current curve is kept (interpolated)")
-                Button("Add Band") { addBand() }.disabled(pts.isEmpty)
-                Button("Remove Band") { removeBand() }.disabled(selected == nil || pts.count <= 2)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 330)
+                .help("Fixed bands: frequencies locked to the standard bands. Variable: every node's frequency is editable. Converting to fixed bands resamples the curve (asks first).")
+                .accessibilityLabel("Band mode")
+                Button("Flatten") { write(pts.map { GraphicEQPoint(freq: $0.freq, gainDB: 0) }) }
+                    .help("Set every band to 0 dB")
+                Button("Add Band") { addBand() }.disabled(pts.isEmpty || !variable)
+                Button("Remove Band") { removeBand() }.disabled(selected == nil || pts.count <= GraphicEQEditing.minNodes || !variable)
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
             GraphicEQCurve(points: pts, range: r, selectedFreq: selected.flatMap { pts.indices.contains($0) ? pts[$0].freq : nil })
@@ -588,10 +666,17 @@ struct GraphicEQEditor: View {
                                            },
                                            onEnd: model.endGesture)
                                 .frame(width: 26, height: 190)
-                            Text(GraphicEQEditor.short(p.freq)).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
-                                .fixedSize()
+                            if variable {
+                                NumberField(value: p.freq, digits: 1, label: "Band \(i + 1) frequency in Hz", width: 44) { v in
+                                    selected = i
+                                    model.setGEQNode(ref, i, freq: v)
+                                }
+                            } else {
+                                Text(GraphicEQEditor.short(p.freq)).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
+                                    .fixedSize()
+                            }
                         }
-                        .frame(width: 30)
+                        .frame(width: variable ? 48 : 30)
                         .padding(.vertical, 4)
                         .background(RoundedRectangle(cornerRadius: 4).fill(selected == i ? Color.accentColor.opacity(0.12) : .clear))
                         .onTapGesture { selected = i }
@@ -602,17 +687,17 @@ struct GraphicEQEditor: View {
             if let i = selected, pts.indices.contains(i) {
                 HStack(spacing: 8) {
                     Text("Selected band:").font(.callout)
-                    NumberField(value: pts[i].freq, digits: 1, label: "Band frequency in Hz", width: 70) { v in
-                        var n = pts; n[i].freq = max(1, v); write(n.sorted { $0.freq < $1.freq })
-                    }
+                    NumberField(value: pts[i].freq, digits: 2, label: "Band frequency in Hz", width: 70) { v in model.setGEQNode(ref, i, freq: v) }
+                        .disabled(!variable)
                     Text("Hz").font(.caption).foregroundStyle(.secondary)
-                    NumberField(value: pts[i].gainDB, digits: 2, label: "Band gain in dB", width: 56) { v in
-                        var n = pts; n[i].gainDB = v; write(n)
-                    }
+                    NumberField(value: pts[i].gainDB, digits: 2, label: "Band gain in dB", width: 56) { v in model.setGEQNode(ref, i, gain: v) }
                     Text("dB").font(.caption).foregroundStyle(.secondary)
+                    if !variable { Text("Frequencies are locked in fixed-band mode.").font(.caption).foregroundStyle(.secondary) }
                 }
             } else {
-                Text("Click a band to select it. Drag a slider, or use the arrow keys on a focused slider (0.5 dB steps).")
+                Text(variable
+                     ? "Variable: type a frequency under a slider, or drag the nodes on the graph or in the list row. A frequency stays between its neighbours."
+                     : "Fixed bands: click a band to select it. Drag a slider, or use the arrow keys on a focused slider (0.5 dB steps).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -628,25 +713,19 @@ struct GraphicEQEditor: View {
 
     func addBand() {
         let pts = points
-        guard !pts.isEmpty else { return }
-        let i = selected ?? (pts.count - 2)
-        var n = pts
-        if i >= 0, i + 1 < pts.count {
-            let f = (pts[i].freq * pts[i + 1].freq).squareRoot()
-            let fr = GraphFormat.roundFreq(f)
-            n.insert(GraphicEQPoint(freq: fr, gainDB: (GraphicEQDesigner.interpolateDB(pts, fr) * 10).rounded() / 10), at: i + 1)
-            selected = i + 1
-        } else {
-            n.append(GraphicEQPoint(freq: min(24000, pts.last!.freq * 1.26), gainDB: pts.last!.gainDB))
-            selected = n.count - 1
+        guard pts.count >= 2 else { return }
+        let i = min(selected ?? (pts.count - 2), pts.count - 2)
+        let f = (pts[i].freq * pts[i + 1].freq).squareRoot()
+        if let r = GraphicEQEditing.addNode(pts, freq: f) {
+            model.endGesture()
+            write(r.points)
+            selected = r.index
         }
-        write(n)
     }
 
     func removeBand() {
-        guard let i = selected, points.count > 2 else { return }
-        var n = points
-        n.remove(at: i)
+        guard let i = selected, let n = GraphicEQEditing.removeNode(points, index: i) else { return }
+        model.endGesture()
         write(n)
         selected = nil
     }

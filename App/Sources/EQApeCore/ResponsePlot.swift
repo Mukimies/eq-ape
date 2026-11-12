@@ -2,8 +2,9 @@ import EQCore
 import Foundation
 
 /// Frequency-response data for the editor graph, computed from a `WorkspaceEvaluation` with EQCore's exact
-/// biquad magnitudes (high/low-pass etc. included) and GraphicEQ's interpolated curve. Cheap enough to recompute
-/// on every drag step (a few hundred points).
+/// biquad magnitudes (high/low-pass etc. included) and GraphicEQ's interpolated curve (the line as written). The
+/// anti-clipping peak and gain come from EQCore's full-chain search (`Response.chainPeak`, which measures the
+/// designed GraphicEQ FIR), the same function `EQProcessor` uses. Cheap enough to recompute on every drag step.
 public struct ResponsePlot: Sendable {
     public struct Options: Equatable, Sendable {
         public var includePreamp = true
@@ -20,7 +21,8 @@ public struct ResponsePlot: Sendable {
     public var left: [Double]
     public var right: [Double]
     public var channelsDiffer: Bool
-    /// Peak of each chain as EQ Ape's anti-clipping computes it (EQCore `Response.peak`, 5 Hz-22 kHz).
+    /// Peak of each chain as EQ Ape's anti-clipping computes it (EQCore `Response.chainPeak`: every stage, 1 Hz to
+    /// just below Nyquist; the frequency can lie outside the plotted 20 Hz-20 kHz).
     public var peakLeft: (dB: Double, freq: Double)
     public var peakRight: (dB: Double, freq: Double)
     /// Gain the engine applies for anti-clipping with these options' headroom (<= 0; 0 when off).
@@ -53,14 +55,9 @@ public struct ResponsePlot: Sendable {
         return out
     }
 
-    /// The engine's anti-clipping gain for a config (same rule as `EQProcessor`).
+    /// The engine's anti-clipping gain for a stereo config (EQCore's `EQProcessor.antiClipGainDB`).
     public static func antiClipGain(_ config: EQConfig, headroomDB: Double?, sampleRate: Double) -> Double {
-        guard let h = headroomDB else { return 0 }
-        var need = 0.0
-        for chain in [config.left, config.right] {
-            need = min(need, -h - Response.peak(stages: chain, sampleRate: sampleRate).dB)
-        }
-        return need
+        EQProcessor.antiClipGainDB(config: config, sampleRate: sampleRate, channels: 2, headroomDB: headroomDB)
     }
 
     /// Grid: `points` log-spaced frequencies plus the centre and band-edge frequencies of every biquad, so narrow
@@ -87,8 +84,9 @@ public struct ResponsePlot: Sendable {
         var l = ResponsePlot.sum(config.left, freqs: f, options: options)
         var r = ResponsePlot.sum(config.right, freqs: f, options: options)
         channelsDiffer = config.left != config.right
-        peakLeft = Response.peak(stages: config.left, sampleRate: options.sampleRate)
-        peakRight = Response.peak(stages: config.right, sampleRate: options.sampleRate)
+        // same peaks and rule as EQProcessor.antiClipGainDB (channels 2)
+        peakLeft = Response.chainPeak(stages: config.left, sampleRate: options.sampleRate)
+        peakRight = config.right == config.left ? peakLeft : Response.chainPeak(stages: config.right, sampleRate: options.sampleRate)
         var ac = 0.0
         if let h = options.headroomDB {
             ac = min(0, min(-h - peakLeft.dB, -h - peakRight.dB))

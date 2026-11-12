@@ -72,7 +72,7 @@ Status: matches / differs / missing. "Fixed" = changed in this audit.
 2. `Copy:` and `Delay:`: need public-model changes (channel matrix stage; delay stage). Coordinate with the app first.
 3. `Convolution:` using the existing partitioned convolver.
 4. `Device:` (profile selection by output device pattern).
-5. `Response.magnitudeDB`/`peak` ignore LP/HP/NO/AP/BP, so UIs that plot the response or compute headroom from `peak` ignore the user's HPQ stages (they only ever lower the peak, so headroom stays safe; the plot is wrong at low frequencies). Use `exactMagnitudeDB` for plotting. Not changed because the API contract pins the reference semantics.
+5. ~~`Response.magnitudeDB`/`peak` ignore LP/HP/NO/AP/BP.~~ Resolved 2026-11-12 for anti-clipping: `EQProcessor` and the editor now use `Response.chainPeak`, which evaluates every stage (and the designed GraphicEQ FIR). The old functions keep their reference semantics for compatibility. Ignoring the high-pass was not always safe: a resonant (Q > 0.707) high-pass or low-pass raises the peak, which the reference search missed. See EQCORE-NOTES.md, "Anti-clipping".
 6. GraphicEQ FIR: optionally match APO's 16384 taps/half-Hann taper (difference is negligible).
 7. IIR filter type; GraphicEQ with a single node.
 8. ANSI fallback for non-UTF-8 files.

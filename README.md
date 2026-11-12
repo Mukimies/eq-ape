@@ -9,7 +9,7 @@ Early beta, built in one evening. What has and has not been checked:
 - **Measured and tested:** the tap engine (tap, aggregate device, in-place processing, replay to the same device) was measured on a Scarlett Solo USB and on MacBook Pro Speakers: real audio, processing applied, no overloads or timestamp discontinuities, about 23-24 ms added delay. The DSP and config parser are covered by automated tests (`EQCore`, including a parity audit against Equalizer APO's documented behaviour).
 - **Confirmed by ear on one setup:** on a Scarlett Solo USB the first menu-bar build engaged after the permission prompt, sounded correct, and the original, unprocessed sound was muted (no doubling). There is no measurable proxy for muting, so every other device type still needs the same listening check.
 - **Tested headless only:** the app logic (per-device profiles, following the default output, live config reload, sample-rate change, a 5-minute soak, recovery after `kill -9`) was exercised through the app's headless mode. See `docs/APP-NOTES.md` for the numbers.
-- **GUI:** the configuration editor and settings window were rendered offscreen and inspected, and the real GUI was launched with `--no-engine` (no audio engine) and driven in-process by a scripted smoke test (graph drag, live save, undo). It has not yet been used by a person with the engine running. See `docs/EDITOR-NOTES.md`.
+- **GUI:** the configuration editor and settings window were rendered offscreen and inspected, and the real GUI was launched with `--no-engine` (no audio engine) and driven in-process by a scripted smoke test (graph drag, GraphicEQ node drag/add/remove, live save, undo). It has not yet been used by a person with the engine running. See `docs/EDITOR-NOTES.md`.
 - **Unverified:** Bluetooth, AirPlay and HDMI outputs; unplug/replug and sleep/wake; runs longer than five minutes; whether the audio-capture permission survives updates of an unsigned build.
 
 See `docs/APP-NOTES.md` for app-level status. See `docs/TAP-FINDINGS.md` for the full list of what was and was not verified for the tap engine.
@@ -21,11 +21,18 @@ See `docs/APP-NOTES.md` for app-level status. See `docs/TAP-FINDINGS.md` for the
 - A frequency-response graph of the whole config, drawn separately for left and right when they differ. It includes
   high- and low-pass filters, the GraphicEQ curve, and optionally the preamp and the automatic anti-clipping gain. It
   marks the peak that sets the anti-clipping gain and has a hover read-out.
+- Automatic anti-clipping gain: the level is lowered by the largest boost of the whole chain (every filter, including
+  high-pass and resonant filters, and the graphic EQ as it actually plays) plus a headroom you choose, so a steady
+  full-scale tone stays below 0 dBFS. It cannot rule out clipping entirely: the EQ's phase shifts can raise short peaks
+  of already loud music by a few dB, which the clip light shows.
 - Draggable handles on the graph for peaking and shelf filters: horizontal = frequency, vertical = gain, ⌥-drag or
   scroll wheel = Q.
 - A filter list with sliders and fields for each filter, the preamp, Channel sections, included files as collapsible
   sections, and "Enable" for REW's commented-out filters.
-- A band editor with vertical sliders for GraphicEQ lines.
+- GraphicEQ lines as in Equalizer APO's Graphic EQ: each row has its own graph of numbered nodes, a power toggle and a
+  15-band / 31-band / variable choice. In variable mode nodes can be dragged sideways as well as up and down, added
+  (double-click) and removed; the selected line's nodes can also be edited on the main graph. A sheet with vertical
+  band sliders remains as an alternative view. "Add" offers variable, 15-band and 31-band graphic EQ lines.
 - Live saving: changes are written to the file about 150 ms after you stop, and the engine reloads them, so you hear
   them while dragging. Only the lines you change are rewritten; everything else in the file stays byte for byte.
 - Each file is backed up before its first change in a session (`~/Library/Application Support/EQ Ape/Backups`, last 20

@@ -44,6 +44,15 @@ enum SnapshotRenderer {
               + "Filter  3: OFF PK       Fc   2600 Hz  Gain -3.00 dB  Q 2.000\r\n"
               + "Filter  4: ON  None      \r\nFilter  5: ON  None      \r\nPreamp: -2 dB\r\n").write(to: rew, atomically: true, encoding: .utf8)
 
+        let variable = tmp.appendingPathComponent("variable-geq-example.txt")
+        try? """
+        # A variable graphic EQ next to a peaking filter
+        Preamp: -3 dB
+        Filter 1: ON PK Fc 3000 Hz Gain -3 dB Q 2
+        GraphicEQ: 20 4; 45 4; 70 0; 400 -1.5; 900 1; 2500 -2; 6000 0; 12000 2.5; 20000 0
+
+        """.write(to: variable, atomically: true, encoding: .utf8)
+
         var opts = LaunchOptions.current
         opts.backupDir = tmp.appendingPathComponent("Backups").path
         let realPath = ProcessInfo.processInfo.environment["EQAPE_SNAPSHOT_REAL"]
@@ -97,6 +106,17 @@ enum SnapshotRenderer {
                 m.showAntiClip = false
                 render(WarningsList(model: m, dismiss: {}).background(Color(nsColor: .windowBackgroundColor)),
                        size: NSSize(width: 560, height: 360), dark: false, to: out.appendingPathComponent("warnings.png"))
+                // the first of the two GraphicEQ lines selected: its nodes on the graph (fixed 31 bands, ↕ only),
+                // the other line faint, the inline row graphs in the list
+                let geqs = m.graphicEQLines
+                if geqs.count >= 2 {
+                    m.selection = geqs[0]; m.geqNode = 3; m.scrollTarget = nil
+                    render(EditorView(model: m, app: app), size: size, dark: false, to: out.appendingPathComponent("editor-real-geq-selected-light.png"))
+                    render(EditorView(model: m, app: app), size: size, dark: true, to: out.appendingPathComponent("editor-real-geq-selected-dark.png"))
+                    render(rowView(m, geqs[0]), size: NSSize(width: 980, height: 176), dark: false, to: out.appendingPathComponent("geq-row-fixed-light.png"))
+                    render(rowView(m, geqs[0]), size: NSSize(width: 980, height: 176), dark: true, to: out.appendingPathComponent("geq-row-fixed-dark.png"))
+                    m.selection = nil
+                }
                 // the GraphicEQ band editor on the first GraphicEQ line
                 if let geq = m.sections.flatMap({ $0.rows }).first(where: { if case .command(.graphicEQ) = $0.kind { return true }; return false }) {
                     render(GraphicEQEditor(model: m, ref: geq.ref).background(Color(nsColor: .windowBackgroundColor)),
@@ -120,6 +140,19 @@ enum SnapshotRenderer {
             render(EditorView(model: m, app: appS), size: size, dark: false, to: out.appendingPathComponent("editor-stereo-light.png"))
             render(EditorView(model: m, app: appS), size: size, dark: true, to: out.appendingPathComponent("editor-stereo-dark.png"))
         }
+        if let m = editor(variable.path, app: appS, display: "~/EQ/variable-geq-example.txt", select: { $0.graphicEQLines.first }) {
+            m.geqNode = 3
+            render(EditorView(model: m, app: appS), size: size, dark: false, to: out.appendingPathComponent("editor-geq-variable-light.png"))
+            render(EditorView(model: m, app: appS), size: size, dark: true, to: out.appendingPathComponent("editor-geq-variable-dark.png"))
+            if let ref = m.graphicEQLines.first {
+                render(rowView(m, ref), size: NSSize(width: 980, height: 176), dark: false, to: out.appendingPathComponent("geq-row-variable-light.png"))
+                render(rowView(m, ref), size: NSSize(width: 980, height: 176), dark: true, to: out.appendingPathComponent("geq-row-variable-dark.png"))
+                render(GraphicEQEditor(model: m, ref: ref).background(Color(nsColor: .windowBackgroundColor)),
+                       size: NSSize(width: 1080, height: 470), dark: false, to: out.appendingPathComponent("graphiceq-editor-variable-light.png"))
+                render(GraphicEQEditor(model: m, ref: ref).background(Color(nsColor: .windowBackgroundColor)),
+                       size: NSSize(width: 1080, height: 470), dark: true, to: out.appendingPathComponent("graphiceq-editor-variable-dark.png"))
+            }
+        }
         if let m = editor(rew.path, app: appS, display: "~/EQ/rew-export.txt", select: { firstFilter($0, freq: 112) }) {
             render(EditorView(model: m, app: appS), size: size, dark: false, to: out.appendingPathComponent("editor-commented-light.png"))
         }
@@ -142,8 +175,16 @@ enum SnapshotRenderer {
         exit(0)
     }
 
+    static func rowView(_ m: EditorModel, _ ref: LineRef) -> some View {
+        let pts = m.geqPoints(ref) ?? []
+        return GraphicEQRowView(model: m, ref: ref, points: pts, channels: nil)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .controlBackgroundColor))
+    }
+
     static func render<V: View>(_ view: V, size: NSSize, dark: Bool, to url: URL) {
-        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height).background(Color(nsColor: .windowBackgroundColor)))
         host.frame = NSRect(origin: .zero, size: size)
         let win = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: size.width, height: size.height),
                            styleMask: [.borderless], backing: .buffered, defer: false)

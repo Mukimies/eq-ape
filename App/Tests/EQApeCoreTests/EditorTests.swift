@@ -198,15 +198,22 @@ final class EditorTests: XCTestCase {
         XCTAssertEqual(at(40), 8.88, accuracy: 0.05)
         XCTAssertEqual(at(118), -16.15, accuracy: 0.1)
         for f in [250.0, 500, 1000, 5000, 15000] { XCTAssertEqual(at(f), -1.0, accuracy: 0.15, "\(f) Hz: only the -1 dB preamp") }
-        // reference semantics (without the high-pass), as the anti-clipping peak search sees it
+        // the early reference semantics ignore the high-pass (+10.09 dB at 20 Hz); anti-clipping no longer uses them
         XCTAssertEqual(Response.magnitudeDB(stages: cfg.left, freq: 20, sampleRate: 48000), 10.09, accuracy: 0.05)
+        // full-chain peak (high-pass and the measured GraphicEQ FIR included): +8.91 dB near 39.5 Hz
+        XCTAssertEqual(plot.peakLeft.dB, 8.91, accuracy: 0.02)
+        XCTAssertEqual(plot.peakLeft.freq, 39.5, accuracy: 0.5)
         XCTAssertEqual(plot.antiClipDB, -0.5 - plot.peakLeft.dB, accuracy: 1e-9)
-        XCTAssertEqual(plot.antiClipDB, -10.69, accuracy: 0.02)    // matches the headless run's applied gain
+        XCTAssertEqual(plot.antiClipDB, -9.41, accuracy: 0.02)    // was -10.69 with the reference peak
+        // the editor shows exactly the gain the processor applies
+        let proc = EQProcessor(config: cfg, sampleRate: 48000, channels: 2, headroomDB: 0.5, maxFrames: 512)
+        XCTAssertEqual(plot.antiClipDB, proc.appliedHeadroomGainDB, accuracy: 1e-12)
+        XCTAssertEqual(ResponsePlot.antiClipGain(cfg, headroomDB: 0.5, sampleRate: 48000), proc.appliedHeadroomGainDB, accuracy: 1e-12)
         var o2 = o; o2.includePreamp = false
         XCTAssertEqual(ResponsePlot(config: cfg, options: o2).value(ResponsePlot(config: cfg, options: o2).left, at: 1000), 0, accuracy: 0.15)
         var o3 = o; o3.includeAntiClip = true
         let p3 = ResponsePlot(config: cfg, options: o3)
-        XCTAssertEqual(p3.value(p3.left, at: 1000), -1.0 - 10.69, accuracy: 0.2)
+        XCTAssertEqual(p3.value(p3.left, at: 1000), -1.0 - 9.41, accuracy: 0.2)
         // left/right differ
         let lr = APOParser.parse(text: "Channel: L\nPreamp: -3 dB\nChannel: R\nFilter: ON PK Fc 1000 Hz Gain 6 dB Q 1\n", baseURL: nil).config
         let p = ResponsePlot(config: lr, options: o)

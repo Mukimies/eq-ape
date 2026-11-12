@@ -12,7 +12,12 @@ First public pre-release (ad-hoc signed, not notarized, Apple Silicon only, macO
 - Menu bar app that equalizes all system audio on the output device through a Core Audio process tap and a private aggregate device, without a virtual driver.
 - Equalizer APO-style config support: `Preamp`, `Filter` (PK, LSC, HSC, LS, HS, LP, HP, LPQ, HPQ, NO, AP, BP), `GraphicEQ`, `Channel`, `Include`, comments, decimal commas, UTF-8 and UTF-16.
 - Per-device profiles, following the default output device, live config reload (including included files), sample-rate change handling, anti-clipping headroom.
+- Configuration editor: frequency-response graph with draggable filter handles, filter list, live save with backups, undo/redo, A/B bypass, Settings and first-run windows.
+- Variable graphic EQ editing, like Equalizer APO's Graphic EQ: an inline node graph on every GraphicEQ row with numbered nodes, a power toggle and a 15-band / 31-band / variable choice; nodes draggable in frequency and gain (variable mode), added and removed, also on the main response graph; "Add Graphic EQ (variable / 15 bands / 31 bands)"; fixed/variable switch with resampling (asks first) in the band-slider sheet. The file keeps Equalizer APO's `GraphicEQ: f g; ...` syntax and only the edited line changes.
 - Release tooling: `dist/release.sh`, `dist/make-dmg.sh`, GitHub Actions workflows for CI and releases, and a draft Homebrew cask.
+
+### Changed
+- The automatic anti-clipping gain now counts every filter: high-pass, low-pass, notch, all-pass and band-pass (including resonant high/low-pass peaks) and the graphic EQ's real FIR response, searched from 1 Hz to just below Nyquist. Earlier development builds ignored high-pass filters (as an early reference script did) and could spend gain on bass a high-pass removes; for a config with a bass boost and a 30 Hz high-pass the gain went from -10.69 dB to -9.41 dB. It bounds steady tones, not every sample peak (see `docs/EQCORE-NOTES.md`).
 
 ### Known issues
 See `docs/releases/v0.1.0-beta.1.md`.

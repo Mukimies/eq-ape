@@ -64,8 +64,9 @@ GPL; EQ Ape is source-available under Apache-2.0 with the Commons Clause.
     so a Q 10 notch is drawn at its true depth.
   - Biquads use EQCore's exact magnitude, so high-pass, low-pass, notch, all-pass and band-pass are included. GraphicEQ
     uses its interpolated curve. Preamp can be included or excluded.
-  - Anti-clipping uses the engine's own rule (`Response.peak`, 5 Hz–22 kHz, reference semantics), so the plotted peak
-    and gain are the ones the engine applies.
+  - Anti-clipping uses the engine's own function (`EQProcessor.antiClipGainDB` / `Response.chainPeak`: every stage,
+    1 Hz to just below Nyquist, GraphicEQ as the designed FIR plays it), so the plotted peak and gain are exactly the
+    ones the engine applies. Until 2026-11-12 this was `Response.peak` (high-pass ignored); see the update below.
 - `TapController` gained:
   - `setABBypass(_:)`: one lock-free slot swap to "no processor" (unity), and back to the retained EQ box. It takes
     effect from the next IO cycle. A rebuild while bypassed stays bypassed.
@@ -103,11 +104,14 @@ GPL; EQ Ape is source-available under Apache-2.0 with the Commons Clause.
   - Unknown lines are dimmed, with a warning icon and a tooltip.
   - Context menu: Comment Out, Enable, Turn On/Off, Delete. Drag to reorder (`onMove`, within a file). Delete key.
   - "Add Filter" adds after the selected line, otherwise in the file with the most filters.
-- GraphicEQ: the row shows a mini curve and an "Edit Bands…" sheet with vertical band sliders.
+- GraphicEQ (rows reworked 2026-11-12, see the update below): an inline node graph per row, the 15-band / 31-band /
+  Variable choice and a power toggle on the row; nodes editable on the main graph too; the sheet ("Sliders…") with
+  vertical band sliders remains as an alternative view. As first built:
   - The existing points are kept.
   - Add Band (geometric middle of the selected and next band), Remove Band.
   - Band Layout: 10 (octave), 15 (2/3 octave) or 31 (1/3 octave) bands. The current curve is resampled, not
-    discarded. Flatten.
+    discarded. Flatten. (Replaced on 2026-11-12 by the Fixed 15 / Fixed 31 / Variable mode switch; the 10-band
+    layout was dropped to mirror Equalizer APO's choices.)
   - Selected-band frequency and gain fields.
 - Status strip: device and engine state, In and Out meters with peak hold and a clip light, the applied anti-clipping
   gain, the A/B bypass button, notices and save errors, and a warnings popover. Clicking a warning selects its line and
@@ -187,7 +191,8 @@ The new tests cover:
 
 - The brief's "0 dB above 200 Hz" holds only with Preamp excluded. With the −1 dB preamp included the flat part is
   −1.0 dB. Both are visible in the GUI: tick or untick "Preamp".
-- Peak +10.19 dB at 5 Hz, so the anti-clipping gain is −10.69 dB. This equals the headless run in APP-NOTES.
+- Peak +10.19 dB at 5 Hz, so the anti-clipping gain was −10.69 dB, equal to the headless run in APP-NOTES. Since the
+  2026-11-12 update: peak +8.91 dB at 39.6 Hz, gain −9.41 dB.
 
 **Rendered offscreen and inspected** (`--render-snapshots`, NSHostingView in a borderless window that is never shown;
 the PNGs are in `docs/screenshots/`):
@@ -258,14 +263,128 @@ not touched: the mtimes and sizes of all 11 entries are identical before and aft
 - Undo/Redo (⌘Z) are window-level shortcuts, so ⌘Z inside a text field undoes the config edit, not the typing.
 - A shelf's slope control on `LS`/`HS` (not `LSC`/`HSC`) writes an explicit "x dB" slope. In Equalizer APO that makes
   Fc a corner frequency, so the curve shifts. This is correct APO semantics, but surprising.
-- The anti-clipping peak follows EQCore's reference semantics, which ignore high-pass filters. For the real config the
-  peak is at 5 Hz (+10.19 dB), below the 30 Hz high-pass, so about 10.7 dB of gain is spent on bass that the HPQ removes
-  anyway (APO-PARITY gap 5). The editor shows this honestly ("peak +10.2 dB at 5 Hz") but does not change it.
+- ~~The anti-clipping peak ignores high-pass filters.~~ Fixed 2026-11-12 (full-chain peak; see the update below).
+- Anti-clipping is frequency-domain headroom: a full-scale steady tone stays at or below −headroom dBFS, but phase
+  shifts can still raise sample peaks of already-limited music by a few dB. The UI does not promise otherwise (tooltips
+  on "Anti-clip" in the status strip and in Settings say so); the clip light counts such overs.
+- The inline row graph is not horizontally scrollable (Equalizer APO's is): 31 nodes fit across a normal window, and
+  nodes below 20 Hz or above 20 kHz are drawn pinned at the edge.
+- A GraphicEQ line's mode is not stored in the file (Equalizer APO's syntax has none): a line is shown as fixed 15/31
+  bands when its frequencies are exactly the ISO bands, otherwise Variable. Switching a fixed line to Variable is kept for
+  the session only.
+- In fixed-band mode double-click on the graph does nothing (no add or remove); switch to Variable first.
 - List drag-reorder works within one file only. Moving a Channel line changes which lines it applies to (by design).
 - Comment and unknown lines (REW headers) take a full row each, so long REW exports need scrolling.
 - `--no-engine` runs write the editor window frame into the `org.eqape.EQApe` user defaults (autosave), like any run of
   the app.
 - The settings watcher re-reads settings.json on change; the old running build still ignores external edits.
+
+## Update 2026-11-12: full-chain anti-clipping and a variable GraphicEQ editor
+
+### Anti-clipping counts every filter
+
+Details and measurements: `docs/EQCORE-NOTES.md`, "Anti-clipping". In short: the peak search now evaluates the whole
+chain (high-pass, low-pass, notch, all-pass, band-pass included; resonant high/low-pass peaks counted; the GraphicEQ
+contribution measured from the designed FIR, because the interpolated curve under-estimates it at steep or low-frequency
+detail), searches 1 Hz to 0.999 x Nyquist with extra points at every biquad and GraphicEQ node, and refines the maxima.
+The owner's config (scratch copy, 48 kHz, 0.5 dB headroom): **−10.69 dB → −9.41 dB**, peak +10.19 dB at 5 Hz → +8.91 dB
+at 39.6 Hz. A full-scale sine at the worst frequency comes out of the real `EQProcessor` at −0.509 dBFS. `ResponsePlot`
+uses the same function as `EQProcessor`, so the editor's peak label, its "anti-clip" value and the status strip show
+the gain the processor applies (tested to 1e-12 dB). The plotted curves still draw GraphicEQ as its interpolated curve
+(the line as written, within 0.05 dB of the FIR for the owner's curves at 48 kHz); only the peak search measures the FIR.
+The peak marker sits on the plotted curve at the peak frequency.
+
+### GraphicEQ nodes, Equalizer APO's "variable" Graphic EQ
+
+Equalizer APO's Configuration Editor shows a Graphic EQ as a row with its own graph: numbered nodes joined by straight
+segments, a power toggle, and a 15-band / 31-band / variable choice. EQ Ape now does the same (behaviour studied from a
+screenshot of Equalizer APO; no code or assets copied):
+
+![Variable graphic EQ](screenshots/editor-geq-variable-light.png)
+
+- **Inline row graph** (`GEQRowGraphView.swift`): every GraphicEQ row in the list has a 150 pt graph of its own nodes:
+  log frequency 20 Hz–20 kHz (labelled at the band frequencies in fixed mode, at decades in Variable), dB −20…+15 (wider
+  when nodes need it). Nodes are numbered purple rounded squares, the selected node blue with a ring. Drag moves a node
+  vertically always and sideways in Variable mode. Left of the graph: the power toggle (comments the line out with `#` /
+  enables it, as Equalizer APO does; a commented line is shown dashed and is not editable), the 15-band / 31-band /
+  Variable radio buttons, the node count, "Sliders…" (the sheet) and delete.
+- **Main response graph**: when a GraphicEQ line is selected (clicking its row, or a node in its row graph), its own
+  curve (purple, linear in dB over log f between nodes, flat outside the end nodes, exactly EQCore's interpretation)
+  and its nodes are drawn on the main graph; the other GraphicEQ lines are drawn faintly (dashed). Only the selected
+  line's nodes are editable. Peaking/shelf handles stay round and blue/orange, GraphicEQ nodes are numbered purple
+  rounded squares, in light and dark.
+- **Interaction** (main graph and row graph alike, both in sync through the model):
+  - drag = move in frequency and gain, rounded to 0.1 Hz (<100 Hz), 1 Hz (<1 kHz), 10 Hz (<10 kHz), 100 Hz and 0.1 dB; a
+    component that did not move is not rewritten. Nodes keep their order: a node stops 1 % (about 1/70 octave) short
+    of its neighbours; range 1 Hz–24 kHz, ±30 dB;
+  - shift-drag = one axis (the larger movement wins);
+  - double-click on the graph = add a node at that frequency with the curve's current value (response unchanged);
+  - double-click on a node, or Delete/Backspace on the selected node = remove it (at least two remain);
+  - arrows = nudge the selected node (↑↓ 0.5 dB, ←→ 1/24 octave; with shift 1 dB and 1/6 octave); Tab = next node;
+  - a read-out next to the node while dragging ("4: 48.1 Hz +6.2 dB"), and above the main graph the selected node's
+    number, frequency and gain fields for direct entry (typed values are kept as typed, clamped between neighbours),
+    plus a remove button;
+  - in fixed-band mode the frequency is locked (drag is vertical only, the frequency field is disabled) and nodes
+    cannot be added or removed.
+- Every change goes through the existing session: debounced live save, backups, undo/redo; one undo step per drag
+  gesture (coalesced until mouse-up), one per add/remove, consecutive nudges of one node within 0.8 s merge. The
+  combined response curve and the anti-clipping peak marker update on every drag step (21.5 ms per step in the release
+  build for a GraphicEQ drag, including the FIR redesign the anti-clipping search needs; peaking-filter drags are
+  cached and stay at a few ms).
+- **Modes** (`GraphicEQEditing` in EQApeCore, unit-tested): fixed 15 bands (25 Hz–16 kHz, 2/3 octave), fixed 31 bands
+  (20 Hz–20 kHz, 1/3 octave), Variable. Fixed → Variable keeps the points (no file change). Variable → fixed resamples the
+  curve at the band frequencies (gains rounded to 0.1 dB) and, when that changes the response by more than 0.05 dB,
+  first asks ("Convert to 31 bands? … changes the response by up to x dB … Undo restores it"). The sheet has the same
+  switch (Fixed: 15 bands / Fixed: 31 bands / Variable); in Variable mode it shows an editable frequency field under each
+  slider and enables Add Band / Remove Band.
+- **"Add" menu** in the header: the button adds a peaking filter as before; its menu also offers "Add Graphic EQ
+  (variable)" (flat nodes at 20, 100, 1 k, 10 k, 20 kHz), "(15 bands)" and "(31 bands)" (flat), inserted after the
+  selected line like a filter.
+- **File format**: unchanged Equalizer APO syntax, `GraphicEQ: f1 g1; f2 g2; ...`, points written sorted, numbers with
+  `APOFormat.number` (shortest round trip, no trailing zeros, e.g. `GraphicEQ: 20 0; 63 4; 1234.5 -2.5; 12300 0`). Only
+  the edited line changes (its terminator and indentation kept).
+
+Tests (`App/Tests/EQApeCoreTests/GraphicEQEditingTests.swift`, 6 tests): node move with rounding and the "unchanged
+component" rule; clamping and ordering (including a 500-step random walk); add/remove and the two-node minimum; layout
+detection and fixed↔variable conversion; number-formatting round trip (canonical text → parser → same points, short
+decimals for every value a drag can produce); and through `ConfigEditSession`: undo granularity (30 drag steps = 1 step,
+then 1 step per gesture/add/remove), the file on disk differs from the original only in the GraphicEQ line (CRLF file),
+`ConfigLoader`'s and `APOParser`'s stages from the edited file equal the editor's in-memory points, and undo restores
+the original bytes.
+
+### Verification of this update
+
+- `swift test`: EQCore 50 tests, 0 failures (2 skipped without `EQAPE_REAL_CONFIG`); App 26 tests, 0 failures (1
+  skipped without it). With `EQAPE_REAL_CONFIG` pointing at the scratch copy, the real-config tests ran and passed too.
+- Snapshots (rendered offscreen from the dev bundle, each PNG looked at; neutral names, the owner's values only via the
+  neutral scratch copy):
+
+  | File | View |
+  |---|---|
+  | `editor-geq-variable-light.png`, `editor-geq-variable-dark.png` | Generated variable GraphicEQ selected, node 4 selected: nodes on the main graph, the inline row graph in Variable mode |
+  | `editor-real-geq-selected-light.png`, `editor-real-geq-selected-dark.png` | Owner's-config copy, first of its two GraphicEQ lines selected (31 bands, ↕ only); the other drawn faintly; new peak label |
+  | `geq-row-fixed-light.png`, `geq-row-fixed-dark.png` | Inline row, fixed 31 bands |
+  | `geq-row-variable-light.png`, `geq-row-variable-dark.png` | Inline row, Variable |
+  | `graphiceq-editor-light.png`, `graphiceq-editor-dark.png` | Sheet, fixed bands (owner's copy) |
+  | `graphiceq-editor-variable-light.png`, `graphiceq-editor-variable-dark.png` | Sheet, Variable (frequency fields) |
+
+  Fixed after looking: half of the end nodes (20 Hz, 20 kHz) were clipped on the main graph; the selected GraphicEQ row
+  was below the visible part of the list; the sheet's mode picker label wrapped ("Mo/de"); unpainted strips around
+  standalone renders. All existing snapshots were re-rendered (they now show the new anti-clipping numbers).
+- Smoke test, run from `build-dev/EQ Ape.app` with `--no-engine` on a copy of the scratch config: after the existing
+  filter steps it selected the first GraphicEQ line (31 bands), switched it to Variable as the row's radio does (file
+  unchanged), then with synthesised mouse events through `NSWindow.sendEvent`: shift-drag of node 4 sideways
+  (40 Hz → 48.1 Hz, stopping short of the 50 Hz neighbour), vertical drag (+6.2 → +1.7 dB; the peak label updated to
+  "peak +7.6 dB at 32.1 Hz → anti-clip −8.13 dB"), double-click between the 2 and 2.5 kHz nodes (31 → 32 nodes), double-
+  click on the new node (32 → 31), and a vertical drag of node 1 in the inline row graph (+6.2 → +11.3 dB). 5 undo steps.
+  The main graph and the row graph then showed the model's points; the file on disk contained the edited line;
+  `ConfigLoader` read the same stages as the editor and the same GraphicEQ points; undoing everything restored the
+  original bytes of both edited files. 21.5 ms per drag step (264 ms in a debug build). The sheet still attached.
+- Only scripted or rendered, never used by a person: all of the above, the arrow-key nudges, Delete, Tab and the numeric
+  node fields (implemented, not exercised in the smoke test), the conversion confirmation alert (an `NSAlert`; the smoke
+  test only switched fixed → Variable, which needs no confirmation), the power toggle, the "Add" menu items, and trackpad
+  or real mouse feel. Nothing of this update was run with the audio engine; the new anti-clipping gain was verified with
+  the processor in tests and a scratch probe, not heard.
 
 ## Switching from the running build to the new one
 

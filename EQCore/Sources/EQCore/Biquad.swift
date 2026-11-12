@@ -76,9 +76,11 @@ extension BiquadCoeffs {
 
 /// Frequency response of a stage chain.
 ///
-/// `magnitudeDB` and `peak` follow the reference (`chain_db`/`peak_db`): only gain, peaking, shelf and
-/// GraphicEQ stages contribute; high/low-pass, notch, all-pass and band-pass count as 0 dB.
-/// `exactMagnitudeDB` evaluates every biquad kind.
+/// `magnitudeDB` and `peak` follow the early reference script (`chain_db`/`peak_db`): only gain, peaking, shelf
+/// and GraphicEQ stages contribute; high/low-pass, notch, all-pass and band-pass count as 0 dB. They are kept for
+/// compatibility and are no longer used for anti-clipping: `EQProcessor` and the editor use `chainPeak` /
+/// `chainMagnitudeDB` (AntiClip.swift), which evaluate every stage exactly, including the designed GraphicEQ FIR.
+/// `exactMagnitudeDB` evaluates every biquad kind with GraphicEQ's ideal interpolated curve.
 public enum Response {
 
     struct Evaluator {
@@ -115,7 +117,8 @@ public enum Response {
         Evaluator(stages: stages, sampleRate: sampleRate, exact: true).eval(freq, sampleRate)
     }
 
-    /// Peak over 4000 log-spaced points from 5 Hz to 22 kHz (as the reference).
+    /// Peak over 4000 log-spaced points from 5 Hz to 22 kHz (as the reference). Reference semantics (high-pass etc.
+    /// ignored); anti-clipping uses `chainPeak` instead.
     public static func peak(stages: [Stage], sampleRate: Double) -> (dB: Double, freq: Double) {
         let ev = Evaluator(stages: stages, sampleRate: sampleRate, exact: false)
         let n = 4000

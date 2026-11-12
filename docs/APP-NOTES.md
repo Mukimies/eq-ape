@@ -4,7 +4,7 @@ Date 2026-11-11. macOS 26.6.2, Apple Silicon, Swift 6.3.3. EQ Ape is Apple Silic
 Working names: user-visible name **EQ Ape**, executable and identifiers `EQApe`, bundle id placeholder
 `org.eqape.EQApe`, settings in `~/Library/Application Support/EQ Ape/settings.json`.
 
-**Status:** the package builds and its unit tests pass (13 at phase 2, 20 since the editor update). All five runtime tests below passed in headless mode on the
+**Status:** the package builds and its unit tests pass (13 at phase 2, 20 since the editor update, 26 since the GraphicEQ node editor). All five runtime tests below passed in headless mode on the
 real hardware, plus an extra sample-rate test. The bundle builds and passes verification. The release bundle was
 never launched with its engine, on purpose (permission-prompt hazard). The GUI was only launched with `--no-engine`
 (editor update, 2026-11-12: 20 App tests; see `docs/EDITOR-NOTES.md`). The app's own permission prompt and muting by
@@ -148,7 +148,7 @@ Every test used the guarded script: CamillaDSP stopped, default output set to th
 
 | # | Test | Result |
 |---|---|---|
-| 1 | Scarlett + real `config.txt`, 35 s | Input -40.1 dBFS, output **-51.6 dBFS** (-11.5 dB). Applied anti-clip gain **-10.69 dB** + preamp -1 dB = -11.69 dB expected above 100 Hz. **0 overloads, 0 clipped, 0 discontinuities**, 3223 callbacks, 6 parser warnings (REW header lines). Engine start 555 ms. |
+| 1 | Scarlett + real `config.txt`, 35 s | Input -40.1 dBFS, output **-51.6 dBFS** (-11.5 dB). Applied anti-clip gain **-10.69 dB** + preamp -1 dB = -11.69 dB expected above 100 Hz. (Measured with the old reference peak search; since 2026-11-12 the gain for this config is -9.41 dB, see EQCORE-NOTES "Anti-clipping". Not re-run with audio.) **0 overloads, 0 clipped, 0 discontinuities**, 3223 callbacks, 6 parser warnings (REW header lines). Engine start 555 ms. |
 | 2 | Live reload of a copy (`App/.scratch/live`, `--no-headroom`) | Baseline out -40.9 dBFS. Appending `Preamp: -6 dB` gave a reload 0.34 s after the edit and out **-46.9** (-6.0 dB). Changing the *included* file's preamp from -1 to -13 dB gave a reload 0.35 s later and out **-58.9** (another -12.0 dB). Restoring both brought out back to -40.9. Engine rebuilds 1 (never restarted), reloads 4, 0 overloads, 0 discontinuities. |
 | 3 | `--follow-default`, profiles for Scarlett + MacBook Pro Speakers | Scarlett to Speakers: engine moved (event to running took 0.4 s, start 53 ms), processing at -51.6 out. Speakers to Scarlett: moved (start 338 ms), processing. To HDMI monitor (no profile): **engine released**, state "no profile", callbacks stop, nothing tapped. Back to Scarlett: re-engaged (start 257 ms). 4 rebuilds, 0 overloads, 0 clipped. |
 | 4 | Soak, Scarlett + real config, 300 s | **28068 callbacks, 0 overloads, 0 discontinuities, 0 clipped.** All 124 seconds with sound: out -51.6 dBFS (one second -51.7). CPU: 8.59 s of CPU over 286 s = **about 3.0 % of one core** on average (`ps -o %cpu` samples every 15 s showed 0.0–0.3 %, a decaying average). RSS **34.6 MB, flat** (34608–34656 kB, no growth). |
@@ -226,7 +226,7 @@ Logs: `App/.scratch/*.log`.
 6. Listening test for muting: play music quietly. Toggle "EQ Ape On" off and on. Off should sound like plain
    playback, on like the corrected sound, and you should **never** hear doubled, phasey or flanged sound (that
    would mean the original is not muted). Watch "Level" and the clip indicator; the anti-clipping gain should read
-   about -10.69 dB.
+   about -9.41 dB (builds before 2026-11-12: -10.69 dB).
 7. Switch the output to MacBook speakers or headphones. It should show "no profile" and play unprocessed.
    Switch back to the Scarlett and the EQ re-engages.
 8. Optional: toggle "Launch at Login".

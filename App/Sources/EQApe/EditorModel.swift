@@ -38,7 +38,22 @@ final class EditorModel: ObservableObject {
     var displayPathOverride: String?
 
     @Published private(set) var revision = 0
-    @Published var selection: LineRef?
+    @Published var selection: LineRef? { didSet { if selection != oldValue { geqNode = nil } } }
+    /// Selected node of the selected GraphicEQ line (index into its sorted points).
+    @Published var geqNode: Int?
+    /// GraphicEQ lines whose points match a fixed layout but which the user switched to Variable (the file has no
+    /// mode; a line is "fixed" when its frequencies are exactly the 15- or 31-band ones).
+    @Published var variableOverride: Set<LineRef> = []
+    /// Asks before a conversion that changes the response (default: an alert). Returns true to go ahead.
+    var confirmChange: (String, String) -> Bool = { title, text in
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        a.addButton(withTitle: "Convert")
+        a.addButton(withTitle: "Cancel")
+        return a.runModal() == .alertFirstButtonReturn
+    }
+    private var nudgeEndWork: DispatchWorkItem?
     @Published var showPreamp = true { didSet { recomputePlot() } }
     @Published var showAntiClip = false { didSet { recomputePlot() } }
     @Published var showSelected = true
@@ -203,6 +218,16 @@ final class EditorModel: ObservableObject {
         }
         d.handles = handles
         d.selected = selection
+        let geqRefs = graphicEQLines
+        for r in geqRefs where r != selection {
+            if let pts = session.graphicEQPoints(at: r) {
+                d.geqOthers.append(plot.freqs.map { GraphicEQDesigner.interpolateDB(pts, $0) })
+            }
+        }
+        if let sel = selection, let o = geqOverlay(sel) {
+            d.geq = o
+            d.geqCurve = plot.freqs.map { GraphicEQDesigner.interpolateDB(o.points, $0) }
+        }
         if showPeak {
             let useRight = plot.channelsDiffer && plot.peakRight.dB > plot.peakLeft.dB
             let pk = useRight ? plot.peakRight : plot.peakLeft
@@ -214,6 +239,129 @@ final class EditorModel: ObservableObject {
             d.peakLabel = label
         }
         return d
+    }
+
+    // MARK: GraphicEQ nodes
+
+    /// Active GraphicEQ lines (the ones that play), in list order.
+    var graphicEQLines: [LineRef] {
+        sections.flatMap { $0.rows }.compactMap { r in
+            if case .command(.graphicEQ) = r.kind { return r.ref }
+            return nil
+        }
+    }
+
+    /// Sorted points of a GraphicEQ line (active or commented out).
+    func geqPoints(_ ref: LineRef) -> [GraphicEQPoint]? {
+        if case .graphicEQ(let p)? = line(ref)?.anyCommand { return GraphicEQEditing.sorted(p) }
+        return nil
+    }
+
+    func geqLayout(_ ref: LineRef) -> GraphicEQEditing.Layout {
+        guard let p = geqPoints(ref) else { return .variable }
+        let l = GraphicEQEditing.layout(of: p)
+        return variableOverride.contains(ref) ? .variable : l
+    }
+
+    func geqOverlay(_ ref: LineRef) -> GEQOverlay? {
+        guard let p = geqPoints(ref), let l = line(ref) else { return nil }
+        let writable = session.workspace.document(ref.url)?.readOnly == false && l.kind.command != nil
+        return GEQOverlay(ref: ref, points: p, locked: geqLayout(ref) != .variable,
+                          selectedNode: selection == ref ? geqNode.flatMap { p.indices.contains($0) ? $0 : nil } : nil,
+                          editable: writable, active: l.kind.command != nil)
+    }
+
+    private func writeGEQ(_ pts: [GraphicEQPoint], _ ref: LineRef, _ name: String, coalesce: String? = nil) {
+        guard session.workspace.document(ref.url)?.readOnly == false, line(ref)?.kind.command != nil else { return }
+        session.setGraphicEQ(pts, at: ref, name: name, coalesceKey: coalesce)
+    }
+
+    func handleGEQ(_ a: GEQAction) {
+        switch a {
+        case .select(let ref, let i):
+            if selection != ref { selection = ref; scrollTarget = ref }
+            geqNode = i
+        case .drag(let ref, let i, let f, let g, let phase):
+            if phase == .began { if selection != ref { selection = ref }; geqNode = i; return }
+            if phase == .ended { endGesture(); return }
+            guard let pts = geqPoints(ref), pts.indices.contains(i) else { return }
+            let freq = geqLayout(ref) == .variable ? f : pts[i].freq
+            let n = GraphicEQEditing.moveNode(pts, index: i, freq: freq, gain: g)
+            if n != pts { writeGEQ(n, ref, "Drag Graphic EQ Node", coalesce: "geqnode-\(ref.url.path)-\(ref.line)") }
+        case .add(let ref, let f):
+            guard geqLayout(ref) == .variable, let pts = geqPoints(ref), let r = GraphicEQEditing.addNode(pts, freq: f) else { return }
+            endGesture()
+            writeGEQ(r.points, ref, "Add Graphic EQ Node")
+            selection = ref
+            geqNode = r.index
+        case .remove(let ref, let i):
+            guard geqLayout(ref) == .variable, let pts = geqPoints(ref), let n = GraphicEQEditing.removeNode(pts, index: i) else { return }
+            endGesture()
+            writeGEQ(n, ref, "Remove Graphic EQ Node")
+            geqNode = n.isEmpty ? nil : min(i, n.count - 1)
+        case .nudge(let ref, let i, let oct, let db):
+            guard let pts = geqPoints(ref), pts.indices.contains(i) else { return }
+            let n = GraphicEQEditing.moveNode(pts, index: i, freq: pts[i].freq * pow(2, oct), gain: pts[i].gainDB + db)
+            if n != pts { writeGEQ(n, ref, "Nudge Graphic EQ Node", coalesce: "geqnudge-\(ref.url.path)-\(ref.line)-\(i)") }
+            nudgeEndWork?.cancel()
+            let w = DispatchWorkItem { [weak self] in self?.endGesture() }
+            nudgeEndWork = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: w)
+        }
+    }
+
+    /// Typed values for a node (kept as typed, clamped between the neighbours).
+    func setGEQNode(_ ref: LineRef, _ i: Int, freq: Double? = nil, gain: Double? = nil) {
+        guard let pts = geqPoints(ref), pts.indices.contains(i) else { return }
+        let f = geqLayout(ref) == .variable ? (freq ?? pts[i].freq) : pts[i].freq
+        let n = GraphicEQEditing.moveNode(pts, index: i, freq: f, gain: gain ?? pts[i].gainDB, round: false)
+        if n != pts { endGesture(); writeGEQ(n, ref, "Edit Graphic EQ Node") }
+    }
+
+    /// Switch the band mode of a GraphicEQ line (Equalizer APO's 15-band / 31-band / variable choice). Fixed ->
+    /// Variable keeps the points. Variable -> fixed resamples the curve at the band frequencies, after asking when
+    /// that changes the response. Returns false when cancelled.
+    @discardableResult
+    func setGEQLayout(_ layout: GraphicEQEditing.Layout, for ref: LineRef) -> Bool {
+        guard let pts = geqPoints(ref) else { return false }
+        guard let freqs = layout.frequencies else { variableOverride.insert(ref); return true }
+        if pts.map(\.freq) == freqs { variableOverride.remove(ref); return true }
+        let n = GraphicEQEditing.resample(pts, to: freqs)
+        let diff = GraphicEQEditing.maxDifference(pts, n)
+        if diff > 0.05 {
+            let ok = confirmChange("Convert to \(layout.title)?",
+                                   String(format: "The curve is resampled at the %d standard band frequencies. This changes the response by up to %.1f dB where the current curve has detail between them. Undo restores it.", freqs.count, diff))
+            if !ok { return false }
+        }
+        variableOverride.remove(ref)
+        geqNode = nil
+        writeGEQ(n, ref, "Convert to \(layout.title)")
+        return true
+    }
+
+    /// Insert a new GraphicEQ line after the selected line (or where `addFilter` would put a filter) and select it.
+    func addGraphicEQ(_ layout: GraphicEQEditing.Layout) {
+        let pts = layout.frequencies.map { $0.map { GraphicEQPoint(freq: $0, gainDB: 0) } } ?? GraphicEQEditing.defaultVariable
+        let (url, index) = insertionPoint()
+        var newLine = 0
+        session.edit(url, name: "Add Graphic EQ") { doc in
+            let i = min(index ?? doc.appendIndex, doc.appendIndex)
+            try doc.insertCommand(.graphicEQ(points: pts), at: i)
+            newLine = i
+        }
+        let ref = LineRef(url: url, line: newLine)
+        if layout == .variable && GraphicEQEditing.layout(of: pts) != .variable { variableOverride.insert(ref) }
+        selection = ref
+        scrollTarget = ref
+    }
+
+    private func insertionPoint() -> (URL, Int?) {
+        if let sel = selection, session.workspace.document(sel.url)?.readOnly == false { return (sel.url, sel.line + 1) }
+        let url = sections.filter { !$0.readOnly }.max { a, b in
+            a.rows.filter { if case .command(.filter) = $0.kind { return true }; return false }.count <
+            b.rows.filter { if case .command(.filter) = $0.kind { return true }; return false }.count
+        }?.url ?? rootURL
+        return (url, nil)
     }
 
     // MARK: edits
@@ -257,16 +405,7 @@ final class EditorModel: ObservableObject {
     /// filters (the root file when it only Includes others).
     func addFilter(freq: Double = 1000, gain: Double = 0, q: Double = 1) {
         let f = FilterLine(type: "PK", freq: GraphFormat.roundFreq(freq), gainDB: (gain * 10).rounded() / 10, q: q)
-        let url: URL
-        var index: Int?
-        if let sel = selection, session.workspace.document(sel.url)?.readOnly == false {
-            url = sel.url; index = sel.line + 1
-        } else {
-            url = sections.filter { !$0.readOnly }.max { a, b in
-                a.rows.filter { if case .command(.filter) = $0.kind { return true }; return false }.count <
-                b.rows.filter { if case .command(.filter) = $0.kind { return true }; return false }.count
-            }?.url ?? rootURL
-        }
+        let (url, index) = insertionPoint()
         var newLine = 0
         session.edit(url, name: "Add Filter") { doc in
             let i = min(index ?? doc.appendIndex, doc.appendIndex)

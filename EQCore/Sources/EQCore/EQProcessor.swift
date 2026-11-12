@@ -104,16 +104,8 @@ public final class EQProcessor: @unchecked Sendable {
         channelCount = nch
         let maxF = max(1, maxFrames)
 
-        var headroom = 0.0
-        if let h = headroomDB {
-            var need = 0.0
-            let chains = nch == 1 ? [config.left] : [config.left, config.right]
-            for chain in chains {
-                let pk = Response.peak(stages: chain, sampleRate: sampleRate).dB
-                need = min(need, -h - pk)
-            }
-            headroom = need
-        }
+        // Full-chain peak (every biquad kind and the measured FIR response), see AntiClip.swift.
+        let headroom = EQProcessor.antiClipGainDB(config: config, sampleRate: sampleRate, channels: nch, headroomDB: headroomDB)
         headroomGain = headroom
 
         var kernels: [(points: [GraphicEQPoint], kernel: FIRKernel?)] = []
@@ -129,15 +121,13 @@ public final class EQProcessor: @unchecked Sendable {
                 }
             }
             var kernel: FIRKernel?
-            if !curves.isEmpty {
-                let merged = GraphicEQDesigner.merge(curves)
-                if merged.contains(where: { abs($0.gainDB) > 1e-9 }) {
-                    if let hit = kernels.first(where: { $0.points == merged }) { kernel = hit.kernel }
-                    else {
-                        let h = GraphicEQDesigner.design(points: merged, sampleRate: sampleRate)
-                        kernel = FIRKernel(taps: h.map { Float($0) })
-                        kernels.append((merged, kernel))
-                    }
+            if !curves.isEmpty, let merged = GraphicEQDesigner.mergedCurve(of: stages) {
+                if let hit = kernels.first(where: { $0.points == merged }) { kernel = hit.kernel }
+                else {
+                    // the same (memoised) design the anti-clipping peak search measured
+                    let h = GraphicEQDesigner.designedKernel(points: merged, sampleRate: sampleRate).taps
+                    kernel = FIRKernel(taps: h.map { Float($0) })
+                    kernels.append((merged, kernel))
                 }
             }
             return ChannelDSP(biquads: bqs, gainDB: gain, kernel: kernel, maxFrames: maxF)

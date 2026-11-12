@@ -74,10 +74,16 @@ final class DSPTests: XCTestCase {
     func testPeakAndHeadroom() throws {
         var cfg = H.fixtureConfig
         if let url = H.realFiles() { cfg = try APOParser.parse(fileURL: url).config }
-        let pk = Response.peak(stages: cfg.left, sampleRate: 48000)
-        XCTAssertEqual(pk.dB, 10.19, accuracy: 0.05)
+        // The early reference semantics (high-pass ignored) are kept in `Response.peak` for compatibility: +10.19 dB
+        // at 5 Hz, below the 30 Hz high-pass. Anti-clipping no longer uses them (see AntiClipTests).
+        let ref = Response.peak(stages: cfg.left, sampleRate: 48000)
+        XCTAssertEqual(ref.dB, 10.19, accuracy: 0.05)
+        let pk = Response.chainPeak(stages: cfg.left, sampleRate: 48000)
+        XCTAssertEqual(pk.dB, 8.91, accuracy: 0.02)
+        XCTAssertEqual(pk.freq, 39.5, accuracy: 0.5)
         let p = EQProcessor(config: cfg, sampleRate: 48000, channels: 2, headroomDB: 0.5, maxFrames: 512)
-        XCTAssertEqual(p.appliedHeadroomGainDB, -10.69, accuracy: 0.05)
+        XCTAssertEqual(p.appliedHeadroomGainDB, -9.41, accuracy: 0.02)   // was -10.69 with the reference peak
+        XCTAssertEqual(p.appliedHeadroomGainDB, -0.5 - pk.dB, accuracy: 1e-9)
         let q = EQProcessor(config: cfg, sampleRate: 48000, channels: 2, headroomDB: -20, maxFrames: 512)
         XCTAssertEqual(q.appliedHeadroomGainDB, 0)
         let r = EQProcessor(config: cfg, sampleRate: 48000, channels: 2, headroomDB: nil, maxFrames: 512)

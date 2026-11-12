@@ -124,6 +124,7 @@ struct ProfileRow: View {
                 Text("Anti-clip").foregroundStyle(.secondary).frame(width: 74, alignment: .leading)
                 Toggle("Automatic anti-clipping gain", isOn: Binding(get: { profile.headroomEnabled }, set: { v in update { $0.headroomEnabled = v } }))
                     .toggleStyle(.checkbox)
+                    .help("Lowers the level by the largest boost of the whole EQ (every filter, high-pass included) plus the headroom, so a steady tone at full scale stays below 0 dBFS. It does not make clipping impossible: the EQ's phase shifts can raise short peaks of already loud music by a few dB. The clip light shows when that happens.")
                 Spacer()
                 Text("Headroom").foregroundStyle(.secondary)
                 Stepper(value: Binding(get: { profile.headroomDB }, set: { v in update { $0.headroomDB = (v * 10).rounded() / 10 } }),

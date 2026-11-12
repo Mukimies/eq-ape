@@ -14,6 +14,110 @@ struct GraphHandle: Equatable {
     var channel: Int? = nil
 }
 
+/// The GraphicEQ line edited on the graph: its nodes (sorted) and how they may move.
+struct GEQOverlay: Equatable {
+    var ref: LineRef
+    var points: [GraphicEQPoint]
+    /// Fixed 15/31-band layout: frequencies locked, no adding or removing.
+    var locked: Bool
+    var selectedNode: Int?
+    var editable: Bool
+    /// The line is commented out (shown dashed, as if enabled).
+    var active: Bool
+}
+
+/// Actions on GraphicEQ nodes, shared by the main graph and the inline row graph.
+enum GEQAction {
+    case select(LineRef, Int?)
+    case drag(LineRef, Int, Double, Double, GraphDragPhase)
+    case add(LineRef, Double)
+    case remove(LineRef, Int)
+    /// Nudge: octaves (frequency), dB (gain).
+    case nudge(LineRef, Int, Double, Double)
+}
+
+/// Drawing and hit-testing of GraphicEQ nodes: numbered rounded squares in purple (peaking/shelf handles are
+/// round and blue/orange), so the two kinds of handles cannot be confused in light or dark mode.
+enum GEQNodeStyle {
+    static var color: NSColor { .systemPurple }
+
+    static func draw(_ points: [GraphicEQPoint], selected: Int?, at pos: (GraphicEQPoint) -> NSPoint, faint: Bool, size: CGFloat = 15) {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: size < 15 ? 7.5 : 8.5, weight: .bold)
+        for (i, p) in points.enumerated() {
+            let c = pos(p)
+            let sel = i == selected
+            let s = sel ? size + 3 : size
+            let r = NSRect(x: c.x - s / 2, y: c.y - s / 2, width: s, height: s)
+            let path = NSBezierPath(roundedRect: r, xRadius: 3.5, yRadius: 3.5)
+            if faint {
+                NSColor.textBackgroundColor.setFill(); path.fill()
+                color.withAlphaComponent(0.45).setStroke(); path.lineWidth = 1; path.stroke()
+                continue
+            }
+            (sel ? NSColor.controlAccentColor : color).setFill()
+            path.fill()
+            NSColor.textBackgroundColor.setStroke()
+            path.lineWidth = 1.2
+            path.stroke()
+            if sel {
+                let ring = NSBezierPath(roundedRect: r.insetBy(dx: -3, dy: -3), xRadius: 5, yRadius: 5)
+                NSColor.controlAccentColor.withAlphaComponent(0.45).setStroke(); ring.lineWidth = 2; ring.stroke()
+            }
+            let t = NSAttributedString(string: "\(i + 1)", attributes: [.font: font, .foregroundColor: NSColor.white])
+            let ts = t.size()
+            t.draw(at: NSPoint(x: c.x - ts.width / 2, y: c.y - ts.height / 2))
+        }
+    }
+
+    static func hit(_ points: [GraphicEQPoint], _ pt: NSPoint, at pos: (GraphicEQPoint) -> NSPoint, radius: CGFloat = 10) -> Int? {
+        var best: (Int, CGFloat)?
+        for (i, p) in points.enumerated() {
+            let c = pos(p)
+            let d = hypot(c.x - pt.x, c.y - pt.y)
+            if d <= radius, d < (best?.1 ?? .infinity) { best = (i, d) }
+        }
+        return best?.0
+    }
+
+    static func readout(_ p: GraphicEQPoint, index: Int) -> String {
+        "\(index + 1): " + GraphFormat.freq(p.freq) + String(format: "  %+.1f dB", p.gainDB)
+    }
+}
+
+/// Mouse/keyboard behaviour for GraphicEQ nodes in a view that maps frequency and dB to points. Drag moves the node
+/// (shift: one axis, decided by the larger movement; frequencies locked in fixed layouts); the caller writes the
+/// file through the model (one undo step per gesture).
+final class GEQNodeDrag {
+    var index: Int?
+    var start = NSPoint.zero
+    var startValues = (freq: 0.0, gain: 0.0)
+
+    func values(for pt: NSPoint, shift: Bool, locked: Bool, octavesPerPoint: Double, dbPerPoint: Double) -> (Double, Double) {
+        var dx = Double(pt.x - start.x), dy = Double(start.y - pt.y)
+        if shift { if abs(dx) >= abs(dy) { dy = 0 } else { dx = 0 } }
+        if locked { dx = 0 }
+        return (startValues.freq * pow(2, dx * octavesPerPoint), startValues.gain + dy * dbPerPoint)
+    }
+
+    /// Arrow keys / delete for the selected node. Returns true when handled.
+    static func key(_ event: NSEvent, overlay: GEQOverlay?, send: (GEQAction) -> Void) -> Bool {
+        guard let o = overlay, o.editable, let i = o.selectedNode, o.points.indices.contains(i) else { return false }
+        let big = event.modifierFlags.contains(.shift)
+        switch event.keyCode {
+        case 51, 117:   // delete, forward delete
+            if !o.locked { send(.remove(o.ref, i)) }
+            return true
+        case 126: send(.nudge(o.ref, i, 0, big ? 1 : 0.5)); return true
+        case 125: send(.nudge(o.ref, i, 0, big ? -1 : -0.5)); return true
+        case 123: if !o.locked { send(.nudge(o.ref, i, big ? -1.0 / 6 : -1.0 / 24, 0)) }; return true
+        case 124: if !o.locked { send(.nudge(o.ref, i, big ? 1.0 / 6 : 1.0 / 24, 0)) }; return true
+        case 48:   // tab: next node
+            send(.select(o.ref, (i + (big ? o.points.count - 1 : 1)) % o.points.count)); return true
+        default: return false
+        }
+    }
+}
+
 struct GraphData {
     var freqs: [Double] = []
     var left: [Double] = []
@@ -26,6 +130,11 @@ struct GraphData {
     /// Position of the peak marker on the plotted curve, and its text.
     var peak: (freq: Double, dB: Double)?
     var peakLabel: String?
+    /// Curves of the other GraphicEQ lines (faint), on `freqs`.
+    var geqOthers: [[Double]] = []
+    /// The selected GraphicEQ line's curve on `freqs` and its nodes.
+    var geqCurve: [Double]?
+    var geq: GEQOverlay?
 }
 
 enum GraphDragPhase { case began, changed, ended, scroll }
@@ -37,6 +146,8 @@ final class ResponseGraphNSView: NSView {
     var onSelect: ((LineRef?) -> Void)?
     var onDrag: ((LineRef, Double, Double, Double, GraphDragPhase) -> Void)?
     var onAddFilter: ((Double, Double) -> Void)?
+    var onGEQ: ((GEQAction) -> Void)?
+    private let nodeDrag = GEQNodeDrag()
 
     private(set) var dbLow = -12.0, dbHigh = 12.0
     private var hover: NSPoint?
@@ -86,6 +197,7 @@ final class ResponseGraphNSView: NSView {
         var lo = 0.0, hi = 0.0
         for v in data.left + (data.right ?? []) + (data.contribution ?? []) where v.isFinite { lo = min(lo, v); hi = max(hi, v) }
         for h in data.handles { lo = min(lo, h.gain); hi = max(hi, h.gain) }
+        for p in data.geq?.points ?? [] { lo = min(lo, p.gainDB); hi = max(hi, p.gainDB) }
         lo = max(lo, -60); hi = min(hi, 40)
         dbLow = min(-12, (floor((lo - 1.5) / 6)) * 6)
         dbHigh = max(12, (ceil((hi + 1.5) / 6)) * 6)
@@ -188,6 +300,18 @@ final class ResponseGraphNSView: NSView {
             tri.fill()
         }
 
+        // other GraphicEQ lines (faint) and the selected one's curve and nodes
+        for c in data.geqOthers where c.count == data.freqs.count {
+            let path = curvePath(c)
+            path.setLineDash([3, 3], count: 2, phase: 0)
+            stroke(path, GEQNodeStyle.color.withAlphaComponent(0.35), 1)
+        }
+        if let c = data.geqCurve, c.count == data.freqs.count {
+            let path = curvePath(c)
+            if data.geq?.active == false { path.setLineDash([4, 3], count: 2, phase: 0) }
+            stroke(path, GEQNodeStyle.color.withAlphaComponent(0.9), 1.6)
+        }
+
         // handles
         for h in data.handles {
             let c = NSPoint(x: x(h.freq), y: y(h.gain))
@@ -213,6 +337,23 @@ final class ResponseGraphNSView: NSView {
             }
         }
         ctx.restoreGState()
+        // nodes outside the clip so the end nodes (20 Hz, 20 kHz) are whole; positions clamped to the plot
+        if let g = data.geq {
+            GEQNodeStyle.draw(g.points, selected: g.selectedNode, at: nodePos, faint: !g.editable)
+        }
+
+        // node read-out while dragging
+        if let g = data.geq, let i = nodeDrag.index, g.points.indices.contains(i) {
+            let text = GEQNodeStyle.readout(g.points[i], index: i)
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+                                                        .foregroundColor: GEQNodeStyle.color]
+            let s = NSAttributedString(string: text, attributes: attrs)
+            let c = nodePos(g.points[i])
+            var lx = c.x + 14
+            if lx + s.size().width > p.maxX - 4 { lx = c.x - 14 - s.size().width }
+            let ly = max(p.minY + 2, min(p.maxY - s.size().height - 2, c.y - s.size().height - 12))
+            drawLabelBox(s, at: NSPoint(x: lx, y: ly))
+        }
 
         // peak label (outside the clip so it can use the top margin)
         if let pk = data.peak, let text = data.peakLabel {
@@ -330,9 +471,51 @@ final class ResponseGraphNSView: NSView {
         return best?.0
     }
 
+    func nodePos(_ p: GraphicEQPoint) -> NSPoint {
+        let r = plotRect
+        return NSPoint(x: x(min(Self.fMax, max(Self.fMin, p.freq))), y: min(r.maxY, max(r.minY, y(p.gainDB))))
+    }
+
+    func geqNode(at pt: NSPoint) -> Int? {
+        guard let g = data.geq else { return nil }
+        return GEQNodeStyle.hit(g.points, pt, at: nodePos)
+    }
+
+    /// Point of node `i` of the GraphicEQ overlay (smoke test).
+    func geqNodePoint(_ i: Int) -> NSPoint? {
+        guard let g = data.geq, g.points.indices.contains(i) else { return nil }
+        return nodePos(g.points[i])
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !GEQNodeDrag.key(event, overlay: data.geq, send: { self.onGEQ?($0) }) { super.keyDown(with: event) }
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         let pt = convert(event.locationInWindow, from: nil)
+        if let g = data.geq, g.editable {
+            if let i = geqNode(at: pt) {
+                if event.clickCount == 2 { if !g.locked { onGEQ?(.remove(g.ref, i)) }; return }
+                nodeDrag.index = i
+                nodeDrag.start = pt
+                nodeDrag.startValues = (g.points[i].freq, g.points[i].gainDB)
+                dragging = true
+                onGEQ?(.select(g.ref, i))
+                onGEQ?(.drag(g.ref, i, g.points[i].freq, g.points[i].gainDB, .began))
+                return
+            }
+            if event.clickCount == 2, handle(at: pt) == nil, plotRect.contains(pt) {
+                // double-click adds a node on the curve at that frequency (fixed layouts: switch to Variable first)
+                if !g.locked { onGEQ?(.add(g.ref, freq(atX: pt.x))) }
+                return
+            }
+            if handle(at: pt) == nil {
+                // a click on empty space keeps the GraphicEQ line selected (so a double-click can add a node)
+                onGEQ?(.select(g.ref, nil))
+                return
+            }
+        }
         if event.clickCount == 2, handle(at: pt) == nil, plotRect.contains(pt) {
             onAddFilter?(freq(atX: pt.x), db(atY: pt.y))
             return
@@ -347,6 +530,16 @@ final class ResponseGraphNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if let i = nodeDrag.index, let g = data.geq {
+            let pt = convert(event.locationInWindow, from: nil)
+            let p = plotRect
+            let (f, gn) = nodeDrag.values(for: pt, shift: event.modifierFlags.contains(.shift), locked: g.locked,
+                                          octavesPerPoint: log2(Self.fMax / Self.fMin) / Double(p.width),
+                                          dbPerPoint: (dbHigh - dbLow) / Double(p.height))
+            onGEQ?(.drag(g.ref, i, f, gn, .changed))
+            needsDisplay = true
+            return
+        }
         guard dragging, let ref = dragRef else { return }
         let pt = convert(event.locationInWindow, from: nil)
         hover = pt
@@ -366,6 +559,14 @@ final class ResponseGraphNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let i = nodeDrag.index, let g = data.geq {
+            nodeDrag.index = nil
+            dragging = false
+            onGEQ?(.drag(g.ref, i, 0, 0, .ended))
+            updateRange()
+            needsDisplay = true
+            return
+        }
         guard dragging, let ref = dragRef else { return }
         dragging = false
         dragRef = nil
@@ -396,6 +597,7 @@ final class ResponseGraphNSView: NSView {
         var parts: [String] = []
         if let l = data.peakLabel { parts.append(l) }
         parts.append("\(data.handles.count) adjustable filters")
+        if let g = data.geq { parts.append("graphic EQ with \(g.points.count) nodes\(g.locked ? ", fixed bands" : "")") }
         if data.right != nil { parts.append("left and right channels differ") }
         setAccessibilityValue(parts.joined(separator: ", "))
     }
@@ -406,6 +608,7 @@ struct ResponseGraph: NSViewRepresentable {
     var onSelect: (LineRef?) -> Void
     var onDrag: (LineRef, Double, Double, Double, GraphDragPhase) -> Void
     var onAddFilter: (Double, Double) -> Void
+    var onGEQ: (GEQAction) -> Void = { _ in }
 
     func makeNSView(context: Context) -> ResponseGraphNSView {
         let v = ResponseGraphNSView(frame: .zero)
@@ -417,6 +620,7 @@ struct ResponseGraph: NSViewRepresentable {
         v.onSelect = onSelect
         v.onDrag = onDrag
         v.onAddFilter = onAddFilter
+        v.onGEQ = onGEQ
         v.data = data
     }
 }
