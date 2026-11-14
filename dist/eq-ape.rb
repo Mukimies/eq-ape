@@ -3,8 +3,8 @@
 # Tap repository: github.com/Mukimies/homebrew-tap   (the repo MUST be named homebrew-<something>;
 #   "homebrew-tap" gives the short tap name Mukimies/tap)
 # Location in the tap: Casks/eq-ape.rb
-# Install:  brew install --cask Mukimies/tap/eq-ape
-#       or: brew tap Mukimies/tap && brew install --cask eq-ape
+# Install:  brew tap Mukimies/tap && brew trust Mukimies/tap && brew install --cask eq-ape
+#   (Homebrew 7 refuses casks from a tap that was not tapped and trusted explicitly)
 #
 # Per release: `dist/update-cask.sh <version> dist/out/EQ-Ape-<version>.dmg.sha256 > Casks/eq-ape.rb`
 # prints this file with `version` and `sha256` replaced (the release workflow also prints it in the job
@@ -12,7 +12,8 @@
 #
 # The first release (0.1.0-beta.1) is ad-hoc signed and NOT notarized. The official homebrew-cask repository
 # does not accept such apps (see docs/DISTRIBUTION.md section 8), so this cask is for the personal tap only.
-# `brew audit --cask` and `brew install` have never been run against this file.
+# `brew fetch --cask` (download + checksum) and `brew audit --cask` passed for 0.1.0-beta.2 on Homebrew 7.0.13;
+# `brew install` has never been run against this file.
 cask "eq-ape" do
   version "0.1.0-beta.1"
   sha256 "REPLACE_WITH_SHA256_OF_EQ-Ape-0.1.0-beta.1.dmg"
@@ -31,7 +32,7 @@ cask "eq-ape" do
   # The cask DSL only knows major macOS names, so Sonoma (14) is the floor; EQ Ape itself needs 14.2
   # (LSMinimumSystemVersion) and Homebrew cannot express that.
   depends_on arch: :arm64
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "EQ Ape.app"
 

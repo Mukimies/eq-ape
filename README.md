@@ -81,11 +81,21 @@ EQ Ape is not affiliated with, endorsed by or sponsored by the Equalizer APO pro
 
 ## Installing
 
-Download the DMG from the [GitHub Releases](https://github.com/Mukimies/eq-ape/releases) page of this repository once a release is available (the first one will be the pre-release `v0.1.0-beta.1`), open it and drag EQ Ape to Applications. Verify the download with the `.sha256` file: `shasum -a 256 -c EQ-Ape-<version>.dmg.sha256`.
+There are two ways to install a release. Both give the same app, and in both cases macOS blocks the first launch (see below).
 
-A Homebrew tap (`brew install --cask Mukimies/tap/eq-ape`) is planned and does not exist yet. Even then the app arrives quarantined and the steps below still apply; see `docs/DISTRIBUTION.md`, section 8.
+**Homebrew** (easier to update later):
 
-The first release is **not notarized** (there is no Apple Developer ID yet; it is ad-hoc signed). On current macOS (15 and later), Control-click > Open no longer bypasses Gatekeeper. Instead:
+```sh
+brew tap Mukimies/tap
+brew trust Mukimies/tap
+brew install --cask eq-ape
+```
+
+Homebrew 7 only installs casks from a third-party tap after it has been tapped and trusted explicitly; on older Homebrew versions without `brew trust`, skip that line. Update with `brew upgrade --cask eq-ape`, remove with `brew uninstall --cask eq-ape`. The cask's download, checksum and audit were checked with Homebrew 7.0.13; the install step itself has not been run yet.
+
+**DMG:** download it from the [GitHub Releases](https://github.com/Mukimies/eq-ape/releases) page, open it and drag EQ Ape to Applications. Verify the download with the `.sha256` file: `shasum -a 256 -c EQ-Ape-<version>.dmg.sha256`.
+
+The releases so far are **not notarized** (there is no Apple Developer ID yet; it is ad-hoc signed). On current macOS (15 and later), Control-click > Open no longer bypasses Gatekeeper. Instead:
 
 1. Double-click EQ Ape. macOS shows an alert that it cannot verify the app. Close it (do not move the app to the Trash).
 2. Open System Settings > Privacy & Security, scroll to the Security section and click **Open Anyway** next to the EQ Ape message, then confirm.
