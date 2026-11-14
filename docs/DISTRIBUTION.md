@@ -24,13 +24,12 @@ Real (exists in the repository, and was run where stated):
 - `dist/make-dmg.sh`: run through `release.sh`. Its Developer ID and notarization branches have **never been executed**.
 - `docs/releases/v0.1.0-beta.1.md` (release notes with `{{VERSION}}` / `{{SHA256}}` placeholders that `release.sh` fills in, written to `dist/out/RELEASE-NOTES.md`) and `CHANGELOG.md`.
 - `.github/workflows/ci.yml` and `release.yml`: YAML parses (Ruby loader), reviewed by hand, **never run**; actionlint was not available. The runner label, Xcode version and action versions were checked against GitHub's published runner-images listing on 2026-11-12.
-- `dist/eq-ape.rb` and `dist/update-cask.sh`: `ruby -c` passes and `brew style` flags nothing but a frozen-string comment that casks do not need; the cask was **never** audited or installed.
+- `dist/eq-ape.rb` and `dist/update-cask.sh`: `ruby -c` passes and `brew style` flags nothing but a frozen-string comment that casks do not need; `brew fetch --cask` and `brew audit --cask` passed for 0.1.0-beta.2 (Homebrew 7.0.13, 2026-11-14); `brew install` was never run.
 - `SECURITY.md`, `CONTRIBUTING.md`, issue template. Private vulnerability reporting is **disabled** on the repository as of 2026-11-12 (read-only API query); the owner must enable it (runbook step 2).
 - Name conflict search: done, see `docs/DISTRIBUTION.md` section 10.
 
 Still planned or open:
 - Developer ID, notarization, Sparkle or any updater (section 3, 7).
-- The `Mukimies/homebrew-tap` repository (does not exist; not created).
 - The TCC-survival test, the listening test and the self-signed-certificate test (section 12 items 3 and 4).
 - A first real run of both workflows, and a download-and-open test of the released DMG on a second Mac.
 
@@ -286,7 +285,7 @@ older than 30 days, and the star threshold, then submit with `brew bump-cask-pr`
 `brew install --cask Mukimies/tap/eq-ape` (or `brew tap Mukimies/tap` first).
 
 What the user will experience (sources: Homebrew 5.0.0 announcement [16], the TomatoBar issue thread [25], and the
-source of Homebrew 7.0.13 read on the author's machine, 2026-11-12; the cask itself was **never installed or audited**,
+source of Homebrew 7.0.13 read on the author's machine, 2026-11-12; the cask was fetched and audited on 2026-11-14 but **never installed**,
 and the whole sequence below is **unverified end to end**):
 1. *Trust.* Homebrew 7.x requires non-official taps to be trusted before it loads their casks (`brew trust`; the
    `HOMEBREW_REQUIRE_TAP_TRUST` behaviour is the default). Reading the source: `brew install --cask Mukimies/tap/eq-ape`
