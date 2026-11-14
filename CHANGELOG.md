@@ -4,6 +4,10 @@ All notable changes to EQ Ape are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-11-14
+
+Third pre-release (ad-hoc signed, not notarized, Apple Silicon only, macOS 14.2+).
+
 ### Added
 - `--login-item status|on|off`: read or change the "launch at login" item from the command line.
 
@@ -45,6 +49,7 @@ First public pre-release (ad-hoc signed, not notarized, Apple Silicon only, macO
 ### Known issues
 See `docs/releases/v0.1.0-beta.1.md`.
 
-[Unreleased]: https://github.com/Mukimies/eq-ape/compare/v0.1.0-beta.2...HEAD
+[Unreleased]: https://github.com/Mukimies/eq-ape/compare/v0.1.0-beta.3...HEAD
+[0.1.0-beta.3]: https://github.com/Mukimies/eq-ape/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/Mukimies/eq-ape/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/Mukimies/eq-ape/releases/tag/v0.1.0-beta.1
